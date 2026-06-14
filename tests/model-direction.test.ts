@@ -197,6 +197,28 @@ function testPassengersLeaveOneAtATimeWithSeparateEvents(): void {
     assert(secondEvents[0].stopDeliveredCount === 2, 'the stop counter should increment for each passenger');
 }
 
+function testPatienceWarningAndFailureRule(): void {
+    const model = new GameModel();
+    const passenger = model.createPassenger(0, 2);
+    passenger.maxPatience = 4;
+    passenger.patience = 1.1;
+
+    model.update(0.15);
+    assert(model.warningFloors.includes(0), 'the passenger floor should warn during the final quarter');
+    model.update(0.65);
+    const warningEvents = model.drainWarningEvents();
+    assert(warningEvents.length === 1, 'a warning floor should emit one rhythmic warning event');
+    assert(warningEvents[0].floor === 0, 'the warning event should identify the passenger floor');
+
+    model.queueFloor(2);
+    const positionBeforeFailure = model.elevator.position;
+    model.update(0.31);
+    assert(model.progress.failed, 'one timed-out passenger should fail the current game');
+    assert(passenger.state === PassengerState.Lost, 'the timed-out passenger should leave the queue');
+    model.update(1);
+    assert(model.elevator.position === positionBeforeFailure, 'the simulation should freeze after failure');
+}
+
 testManualBoardingIgnoresDirection();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
@@ -206,4 +228,5 @@ testFloorRequestStartsAfterBoardingCompletes();
 testCurrentFloorRequestDoesNotPretendToMove();
 testElevatorCanTravelToSecondAndThirdFloors();
 testPassengersLeaveOneAtATimeWithSeparateEvents();
+testPatienceWarningAndFailureRule();
 console.log('MODEL_DIRECTION_RULES_OK');

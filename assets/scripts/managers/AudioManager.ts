@@ -21,6 +21,7 @@ export class AudioManager {
         });
         this.unsubscribes.push(events.on('passenger-boarded', () => this.playPassengerStep()));
         this.unsubscribes.push(events.on('passenger-delivered', () => this.playPassengerStep()));
+        this.unsubscribes.push(events.on('passenger-warning', () => this.playWarning()));
     }
 
     dispose(): void {
@@ -30,6 +31,12 @@ export class AudioManager {
     private playPassengerStep(): void {
         if (this.boardingClip) {
             this.source.playOneShot(this.boardingClip, 1);
+        }
+    }
+
+    private playWarning(): void {
+        if (this.boardingClip) {
+            this.source.playOneShot(this.boardingClip, 0.7);
         }
     }
 }

@@ -24,6 +24,9 @@ export class GameManager {
         this.model.drainDeliveredEvents().forEach((event) => {
             this.events.emit('passenger-delivered', event);
         });
+        this.model.drainWarningEvents().forEach((event) => {
+            this.events.emit('passenger-warning', event);
+        });
         this.saveTimer += deltaTime;
         if (this.saveTimer >= 5) {
             this.saveTimer = 0;

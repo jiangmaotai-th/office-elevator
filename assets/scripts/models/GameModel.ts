@@ -7,6 +7,7 @@ import {
     PassengerBoardedEvent,
     PassengerDeliveredEvent,
     PassengerState,
+    PassengerWarningEvent,
     ProgressModel,
     UpgradeModel,
     UpgradeType,
@@ -15,6 +16,8 @@ import {
 const MIN_FLOORS = 3;
 const BOARDING_INTERVAL = 0.22;
 const UNLOADING_INTERVAL = 0.28;
+const PATIENCE_WARNING_RATIO = 0.25;
+const WARNING_SOUND_INTERVAL = 0.8;
 
 export class GameModel {
     readonly passengers: PassengerModel[] = [];
@@ -43,6 +46,7 @@ export class GameModel {
         unlockedFloors: MIN_FLOORS,
         elapsedSeconds: 0,
         completed: false,
+        failed: false,
     };
     readonly upgrades: UpgradeModel = {
         capacityLevel: 0,
@@ -55,8 +59,10 @@ export class GameModel {
     private readonly unloadingQueue: number[] = [];
     private readonly boardedEvents: PassengerBoardedEvent[] = [];
     private readonly deliveredEvents: PassengerDeliveredEvent[] = [];
+    private readonly warningEvents: PassengerWarningEvent[] = [];
     private boardingTimer = 0;
     private unloadingTimer = 0;
+    private warningTimer = 0;
     private pendingArrivalDirection: ElevatorDirection | null = null;
     private stopDeliveredCount = 0;
 
@@ -69,6 +75,7 @@ export class GameModel {
         Object.assign(this.upgrades, snapshot.upgrades ?? {});
         this.applyUpgradeEffects();
         this.progress.completed = false;
+        this.progress.failed = false;
     }
 
     snapshot(): GameSnapshot {
@@ -100,6 +107,14 @@ export class GameModel {
 
     get waitingPassengers(): PassengerModel[] {
         return this.passengers.filter((passenger) => passenger.state === PassengerState.Waiting);
+    }
+
+    get warningFloors(): number[] {
+        return [...new Set(
+            this.waitingPassengers
+                .filter((passenger) => passenger.patience / passenger.maxPatience <= PATIENCE_WARNING_RATIO)
+                .map((passenger) => passenger.originFloor),
+        )];
     }
 
     get elevatorOccupancy(): number {
@@ -139,6 +154,10 @@ export class GameModel {
         return this.deliveredEvents.splice(0);
     }
 
+    drainWarningEvents(): PassengerWarningEvent[] {
+        return this.warningEvents.splice(0);
+    }
+
     queueFloor(floor: number): boolean {
         if (floor < 0 || floor >= this.progress.unlockedFloors) {
             return false;
@@ -155,11 +174,15 @@ export class GameModel {
     }
 
     update(deltaTime: number): void {
-        if (this.progress.completed) {
+        if (this.progress.completed || this.progress.failed) {
             return;
         }
         this.progress.elapsedSeconds += deltaTime;
         this.updatePatience(deltaTime);
+        if (this.progress.failed) {
+            return;
+        }
+        this.updatePatienceWarnings(deltaTime);
         this.updateUnloading(deltaTime);
         this.updateBoarding(deltaTime);
         this.updateElevator(deltaTime);
@@ -199,16 +222,33 @@ export class GameModel {
     }
 
     private updatePatience(deltaTime: number): void {
-        this.waitingPassengers.forEach((passenger) => {
+        for (const passenger of this.waitingPassengers) {
             passenger.patience -= deltaTime;
             if (passenger.patience > 0) {
-                return;
+                continue;
             }
+            passenger.patience = 0;
             passenger.state = PassengerState.Lost;
             this.economy.lost += 1;
             this.economy.multiplier = 1;
             this.economy.multiplierProgress = 0;
-        });
+            this.progress.failed = true;
+            return;
+        }
+    }
+
+    private updatePatienceWarnings(deltaTime: number): void {
+        const warningFloors = this.warningFloors;
+        if (warningFloors.length === 0) {
+            this.warningTimer = 0;
+            return;
+        }
+        this.warningTimer += deltaTime;
+        if (this.warningTimer < WARNING_SOUND_INTERVAL) {
+            return;
+        }
+        this.warningTimer %= WARNING_SOUND_INTERVAL;
+        warningFloors.forEach((floor) => this.warningEvents.push({ floor }));
     }
 
     private updateElevator(deltaTime: number): void {
@@ -416,8 +456,10 @@ export class GameModel {
         this.unloadingQueue.length = 0;
         this.boardedEvents.length = 0;
         this.deliveredEvents.length = 0;
+        this.warningEvents.length = 0;
         this.boardingTimer = 0;
         this.unloadingTimer = 0;
+        this.warningTimer = 0;
         this.pendingArrivalDirection = null;
         this.stopDeliveredCount = 0;
         this.progress.day += 1;
@@ -425,6 +467,7 @@ export class GameModel {
         this.progress.targetDeliveries += 6;
         this.progress.elapsedSeconds = 0;
         this.progress.completed = false;
+        this.progress.failed = false;
         this.economy.delivered = 0;
         this.economy.lost = 0;
         this.economy.multiplier = 1;

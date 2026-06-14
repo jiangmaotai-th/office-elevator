@@ -106,6 +106,11 @@ export class GameView implements GameHitAreas {
             this.labels.complete.node.active = false;
             this.setUpgradeLabelsActive(false);
         }
+        if (model.progress.failed) {
+            this.drawFailure(model);
+        } else {
+            this.labels.failure.node.active = false;
+        }
     }
 
     floorAt(position: Vec3): number | null {
@@ -173,6 +178,10 @@ export class GameView implements GameHitAreas {
         this.labels.notice = this.createLabel('Notice', 24, 610, new Vec3(-305, 390));
         this.labels.complete = this.createLabel('Complete', 34, 540, new Vec3(-270, 30));
         this.labels.complete.node.active = false;
+        this.labels.failure = this.createLabel('Failure', 34, 540, new Vec3(-270, 30));
+        this.labels.failure.node.getComponent(UITransform)?.setContentSize(540, 180);
+        this.labels.failure.lineHeight = 46;
+        this.labels.failure.node.active = false;
     }
 
     private createLabel(name: string, fontSize: number, width: number, position: Vec3): Label {
@@ -239,6 +248,12 @@ export class GameView implements GameHitAreas {
             this.graphics.fillColor = floor % 2 === 0 ? OFFICE_WALL : OFFICE_WALL_ALT;
             this.graphics.rect(towerLeft, y - floorGap * 0.48, towerRight - towerLeft, floorGap * 0.96);
             this.graphics.fill();
+            if (model.warningFloors.includes(floor)) {
+                const pulse = (Math.sin(model.progress.elapsedSeconds * Math.PI * 5) + 1) * 0.5;
+                this.graphics.fillColor = new Color(205, 42, 47, 35 + Math.round(pulse * 95));
+                this.graphics.rect(towerLeft, y - floorGap * 0.48, towerRight - towerLeft, floorGap * 0.96);
+                this.graphics.fill();
+            }
             this.line(towerLeft, y - floorGap * 0.48, towerRight, y - floorGap * 0.48, new Color(12, 13, 15, 255), 3);
             this.drawFloorMarker(floor, y);
             this.drawOfficeDetails(floor, y, floorGap);
@@ -338,9 +353,10 @@ export class GameView implements GameHitAreas {
             this.graphics.fill();
         }
 
-        this.graphics.strokeColor = patienceRatio < 0.3 ? DANGER : new Color(225, 220, 211, 170);
+        const elapsedRatio = Math.max(0, Math.min(1, 1 - patienceRatio));
+        this.graphics.strokeColor = patienceRatio <= 0.25 ? DANGER : new Color(225, 220, 211, 170);
         this.graphics.lineWidth = 2;
-        this.graphics.arc(x, y, 25, Math.PI / 2, Math.PI / 2 + Math.PI * 2 * patienceRatio, false);
+        this.graphics.arc(x, y, 25, Math.PI / 2, Math.PI / 2 + Math.PI * 2 * elapsedRatio, false);
         this.graphics.stroke();
     }
 
@@ -433,6 +449,17 @@ export class GameView implements GameHitAreas {
         this.drawUpgradeCard(-290, UpgradeType.Capacity, '扩容', `轿厢容量 +1\n当前 ${model.elevator.capacity}`);
         this.drawUpgradeCard(-95, UpgradeType.Speed, '提速', `运行速度 +15%\n等级 ${model.upgrades.speedLevel}`);
         this.drawUpgradeCard(100, UpgradeType.Patience, '安抚', `耐心上限 +4秒\n等级 ${model.upgrades.patienceLevel}`);
+    }
+
+    private drawFailure(model: GameModel): void {
+        this.graphics.fillColor = new Color(24, 25, 28, 225);
+        this.graphics.rect(-320, -180, 640, 360);
+        this.graphics.fill();
+        this.strokeRect(-320, -180, 640, 360, DANGER, 4);
+        this.labels.failure.node.active = true;
+        this.labels.failure.color = PAPER;
+        this.labels.failure.node.setPosition(-265, 65);
+        this.labels.failure.string = `本次运营失败\n有乘客等待超时离开\n已送达 ${model.economy.delivered} 人`;
     }
 
     private drawUpgradeCard(x: number, key: UpgradeType, title: string, description: string): void {

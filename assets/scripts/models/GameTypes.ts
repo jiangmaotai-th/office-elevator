@@ -34,6 +34,10 @@ export interface PassengerDeliveredEvent {
     totalDelivered: number;
 }
 
+export interface PassengerWarningEvent {
+    floor: number;
+}
+
 export interface ElevatorModel {
     currentFloor: number;
     targetFloor: number | null;
@@ -61,6 +65,7 @@ export interface ProgressModel {
     unlockedFloors: number;
     elapsedSeconds: number;
     completed: boolean;
+    failed: boolean;
 }
 
 export enum UpgradeType {

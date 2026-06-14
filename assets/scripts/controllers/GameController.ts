@@ -23,7 +23,11 @@ export class GameController {
     update(deltaTime: number): void {
         this.manager.update(deltaTime);
         this.spawnTimer += deltaTime;
-        if (this.spawnTimer >= 3.2 && !this.manager.model.progress.completed) {
+        if (
+            this.spawnTimer >= 3.2
+            && !this.manager.model.progress.completed
+            && !this.manager.model.progress.failed
+        ) {
             this.spawnTimer = 0;
             this.spawnPassenger();
         }
@@ -63,6 +67,9 @@ export class GameController {
     private handlePointer(x: number, y: number): void {
         const position = this.view.toLocalPosition(x, y);
 
+        if (this.manager.model.progress.failed) {
+            return;
+        }
         if (this.manager.model.progress.completed) {
             const upgrade = this.view.upgradeAt(position);
             if (upgrade) {
