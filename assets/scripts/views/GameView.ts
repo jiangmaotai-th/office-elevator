@@ -10,8 +10,15 @@ import {
     UITransform,
     Vec3,
 } from 'cc';
+import { EventBus } from '../core/EventBus';
 import { GameModel } from '../models/GameModel';
-import { ElevatorDirection, PassengerModel, PassengerState, UpgradeType } from '../models/GameTypes';
+import {
+    ElevatorDirection,
+    PassengerDeliveredEvent,
+    PassengerModel,
+    PassengerState,
+    UpgradeType,
+} from '../models/GameTypes';
 
 const INK = new Color(24, 25, 28, 255);
 const PAPER = new Color(247, 243, 237, 255);
@@ -43,8 +50,9 @@ export class GameView implements GameHitAreas {
     private cabinY = 0;
     private menuOpen = false;
     private interactionMessage = '';
+    private deliveryFeedback: (PassengerDeliveredEvent & { startedAt: number }) | null = null;
 
-    constructor(parent: Node) {
+    constructor(parent: Node, events: EventBus) {
         this.root = new Node('GameView');
         this.root.layer = Layers.Enum.UI_2D;
         parent.addChild(this.root);
@@ -69,6 +77,9 @@ export class GameView implements GameHitAreas {
         drawingNode.addComponent(UITransform).setContentSize(720, 1280);
         this.graphics = drawingNode.addComponent(Graphics);
         this.createLabels();
+        events.on<PassengerDeliveredEvent>('passenger-delivered', (event) => {
+            this.deliveryFeedback = { ...event, startedAt: Date.now() };
+        });
     }
 
     toLocalPosition(uiX: number, uiY: number): Vec3 {
@@ -82,6 +93,7 @@ export class GameView implements GameHitAreas {
         this.drawBackground();
         this.drawHeader(model);
         this.drawTower(model);
+        this.drawDeliveryFeedback(model);
         this.drawBuildButton(model);
         if (this.menuOpen) {
             this.drawMenu(model);
@@ -365,6 +377,36 @@ export class GameView implements GameHitAreas {
                 this.graphics.fill();
             }
         });
+    }
+
+    private drawDeliveryFeedback(model: GameModel): void {
+        const feedback = this.deliveryFeedback;
+        const label = this.labels.deliveryCount;
+        if (!feedback || Date.now() - feedback.startedAt > 650) {
+            if (label) {
+                label.node.active = false;
+            }
+            return;
+        }
+        const floorY = this.floorYs[feedback.floor];
+        const passenger = model.getPassenger(feedback.passengerId);
+        if (floorY === undefined || !passenger) {
+            return;
+        }
+        const progress = Math.min(1, (Date.now() - feedback.startedAt) / 650);
+        this.drawPassenger(passenger, 205 - progress * 62, floorY, 1);
+        this.graphics.fillColor = new Color(22, 23, 25, 230);
+        this.graphics.roundRect(95, floorY + 29, 94, 34, 6);
+        this.graphics.fill();
+        this.drawText(
+            'deliveryCount',
+            `+1  ${feedback.stopDeliveredCount}`,
+            111,
+            floorY + 46,
+            17,
+            PAPER,
+            68,
+        );
     }
 
     private drawBuildButton(model: GameModel): void {

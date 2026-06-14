@@ -159,6 +159,44 @@ function testElevatorCanTravelToSecondAndThirdFloors(): void {
     assert(model.elevator.queue.length === 0, 'both upper-floor requests should be consumed');
 }
 
+function testPassengersLeaveOneAtATimeWithSeparateEvents(): void {
+    const model = new GameModel();
+    const first = model.createPassenger(0, 1);
+    const second = model.createPassenger(0, 1);
+    first.state = PassengerState.Riding;
+    second.state = PassengerState.Riding;
+    model.elevator.passengers = [first.id, second.id];
+
+    model.queueFloor(1);
+    runUntilIdle(model);
+
+    assert(
+        model.getPassenger(first.id)?.state === PassengerState.Exiting,
+        'the first passenger should wait in the unloading queue',
+    );
+    assert(
+        model.getPassenger(second.id)?.state === PassengerState.Exiting,
+        'the second passenger should wait behind the first',
+    );
+    assert(model.elevator.passengers.length === 2, 'both passengers should remain visible before unloading starts');
+
+    model.update(0.27);
+    assert(model.economy.delivered === 0, 'nobody should leave before the first unloading interval');
+    model.update(0.02);
+    const firstEvents = model.drainDeliveredEvents();
+    assert(model.economy.delivered === 1, 'only one passenger should leave on the first interval');
+    assert(model.elevator.passengers.length === 1, 'one passenger should remain inside the cabin');
+    assert(firstEvents.length === 1, 'the first passenger should emit one sound and count event');
+    assert(firstEvents[0].stopDeliveredCount === 1, 'the stop counter should start at one');
+
+    model.update(0.28);
+    const secondEvents = model.drainDeliveredEvents();
+    assert(model.economy.delivered === 2, 'the second passenger should leave on the next interval');
+    assert(model.elevator.passengers.length === 0, 'the cabin should be empty after both passengers leave');
+    assert(secondEvents.length === 1, 'the second passenger should emit a separate event');
+    assert(secondEvents[0].stopDeliveredCount === 2, 'the stop counter should increment for each passenger');
+}
+
 testManualBoardingIgnoresDirection();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
@@ -167,4 +205,5 @@ testCallQueueRemainsFifo();
 testFloorRequestStartsAfterBoardingCompletes();
 testCurrentFloorRequestDoesNotPretendToMove();
 testElevatorCanTravelToSecondAndThirdFloors();
+testPassengersLeaveOneAtATimeWithSeparateEvents();
 console.log('MODEL_DIRECTION_RULES_OK');

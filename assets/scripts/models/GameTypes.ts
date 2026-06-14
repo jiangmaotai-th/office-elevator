@@ -2,6 +2,7 @@ export enum PassengerState {
     Waiting = 'waiting',
     Boarding = 'boarding',
     Riding = 'riding',
+    Exiting = 'exiting',
     Delivered = 'delivered',
     Lost = 'lost',
 }
@@ -24,6 +25,13 @@ export interface PassengerModel {
 export interface PassengerBoardedEvent {
     passengerId: number;
     destinationFloor: number;
+}
+
+export interface PassengerDeliveredEvent {
+    passengerId: number;
+    floor: number;
+    stopDeliveredCount: number;
+    totalDelivered: number;
 }
 
 export interface ElevatorModel {

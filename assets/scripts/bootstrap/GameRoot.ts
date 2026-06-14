@@ -50,7 +50,7 @@ export class GameRoot extends Component {
         manager.initialize();
         this.audioManager = new AudioManager(canvasNode);
         this.audioManager.initialize(manager.events);
-        const gameView = new GameView(canvasNode);
+        const gameView = new GameView(canvasNode, manager.events);
         this.controller = new GameController(manager, gameView);
         this.controller.start();
 

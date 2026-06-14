@@ -4,7 +4,7 @@ import { EventBus } from '../core/EventBus';
 export class AudioManager {
     private readonly source: AudioSource;
     private boardingClip: AudioClip | null = null;
-    private unsubscribe: (() => void) | null = null;
+    private readonly unsubscribes: Array<() => void> = [];
 
     constructor(parent: Node) {
         const audioNode = new Node('AudioManager');
@@ -19,15 +19,15 @@ export class AudioManager {
                 this.boardingClip = clip;
             }
         });
-        this.unsubscribe = events.on('passenger-boarded', () => this.playBoarding());
+        this.unsubscribes.push(events.on('passenger-boarded', () => this.playPassengerStep()));
+        this.unsubscribes.push(events.on('passenger-delivered', () => this.playPassengerStep()));
     }
 
     dispose(): void {
-        this.unsubscribe?.();
-        this.unsubscribe = null;
+        this.unsubscribes.splice(0).forEach((unsubscribe) => unsubscribe());
     }
 
-    private playBoarding(): void {
+    private playPassengerStep(): void {
         if (this.boardingClip) {
             this.source.playOneShot(this.boardingClip, 1);
         }
