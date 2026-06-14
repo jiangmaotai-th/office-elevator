@@ -36,6 +36,8 @@ const TOWER_BOTTOM = -355;
 const TOWER_TOP = 415;
 const FLOOR_GAP = 180;
 const FLOOR_BASE_Y = -285;
+const CABIN_SAFE_TOP = TOWER_TOP - 95;
+const CABIN_SAFE_BOTTOM = TOWER_BOTTOM + 75;
 
 export interface GameHitAreas {
     floorAt(position: Vec3): number | null;
@@ -56,6 +58,7 @@ export class GameView implements GameHitAreas {
     private menuOpen = false;
     private interactionMessage = '';
     private towerScrollOffset = 0;
+    private lastElevatorPosition = 0;
     private deliveryFeedback: (PassengerDeliveredEvent & { startedAt: number }) | null = null;
 
     constructor(parent: Node, events: EventBus) {
@@ -96,6 +99,7 @@ export class GameView implements GameHitAreas {
         this.graphics.clear();
         this.hidePassengerDestinationLabels();
         this.hideDynamicTowerLabels();
+        this.followElevator(model);
         this.drawBackground();
         this.drawTower(model);
         this.drawDeliveryFeedback(model);
@@ -149,9 +153,7 @@ export class GameView implements GameHitAreas {
     }
 
     scrollTowerBy(deltaY: number, floorCount: number): void {
-        const naturalTop = FLOOR_BASE_Y + Math.max(0, floorCount - 1) * FLOOR_GAP;
-        const minOffset = Math.min(0, TOWER_TOP - 80 - naturalTop);
-        this.towerScrollOffset = Math.max(minOffset, Math.min(0, this.towerScrollOffset + deltaY));
+        this.towerScrollOffset = this.clampTowerScroll(this.towerScrollOffset + deltaY, floorCount);
     }
 
     resetTowerScroll(): void {
@@ -306,6 +308,33 @@ export class GameView implements GameHitAreas {
         if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
             this.drawCabin(model, s1Left, elevatorY, shaftWidth);
         }
+    }
+
+    private followElevator(model: GameModel): void {
+        const position = model.elevator.position;
+        const moved = Math.abs(position - this.lastElevatorPosition) > 0.001;
+        this.lastElevatorPosition = position;
+        if (!moved) {
+            return;
+        }
+
+        const cabinY = FLOOR_BASE_Y + position * FLOOR_GAP + this.towerScrollOffset;
+        let nextOffset = this.towerScrollOffset;
+        if (cabinY > CABIN_SAFE_TOP) {
+            nextOffset -= cabinY - CABIN_SAFE_TOP;
+        } else if (cabinY < CABIN_SAFE_BOTTOM) {
+            nextOffset += CABIN_SAFE_BOTTOM - cabinY;
+        }
+        this.towerScrollOffset = this.clampTowerScroll(
+            nextOffset,
+            model.progress.unlockedFloors,
+        );
+    }
+
+    private clampTowerScroll(offset: number, floorCount: number): number {
+        const naturalTop = FLOOR_BASE_Y + Math.max(0, floorCount - 1) * FLOOR_GAP;
+        const minOffset = Math.min(0, CABIN_SAFE_TOP - naturalTop);
+        return Math.max(minOffset, Math.min(0, offset));
     }
 
     private drawTowerViewportMasks(): void {

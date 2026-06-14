@@ -9,7 +9,8 @@ export class GameController {
     private pointerStartX = 0;
     private pointerStartY = 0;
     private pointerLastY = 0;
-    private suppressPointerUntil = 0;
+    private activePointerSource: 'touch' | 'mouse' | null = null;
+    private ignoreMouseUntil = 0;
     private lastPointerTime = -Infinity;
     private lastPointerX = 0;
     private lastPointerY = 0;
@@ -55,33 +56,54 @@ export class GameController {
     }
 
     private onTouchStart(event: EventTouch): void {
+        this.ignoreMouseUntil = Date.now() + 250;
+        this.activePointerSource = 'touch';
         const location = event.getUILocation();
         this.beginPointer(location.x, location.y);
     }
 
     private onTouchMove(event: EventTouch): void {
+        if (this.activePointerSource !== 'touch') {
+            return;
+        }
         const location = event.getUILocation();
         this.movePointer(location.x, location.y);
     }
 
     private onTouchEnd(event: EventTouch): void {
+        if (this.activePointerSource !== 'touch') {
+            return;
+        }
         const location = event.getUILocation();
         this.endPointer(location.x, location.y);
+        this.activePointerSource = null;
+        this.ignoreMouseUntil = Date.now() + 250;
     }
 
     private onMouseDown(event: EventMouse): void {
+        if (Date.now() < this.ignoreMouseUntil) {
+            return;
+        }
+        this.activePointerSource = 'mouse';
         const location = event.getUILocation();
         this.beginPointer(location.x, location.y);
     }
 
     private onMouseMove(event: EventMouse): void {
+        if (this.activePointerSource !== 'mouse' || Date.now() < this.ignoreMouseUntil) {
+            return;
+        }
         const location = event.getUILocation();
         this.movePointer(location.x, location.y);
     }
 
     private onMouseUp(event: EventMouse): void {
+        if (this.activePointerSource !== 'mouse' || Date.now() < this.ignoreMouseUntil) {
+            return;
+        }
         const location = event.getUILocation();
         this.endPointer(location.x, location.y);
+        this.activePointerSource = null;
     }
 
     private beginPointer(x: number, y: number): void {
@@ -110,15 +132,13 @@ export class GameController {
     }
 
     private endPointer(x: number, y: number): void {
-        const now = Date.now();
-        if (!this.pointerDown && now < this.suppressPointerUntil) {
+        if (!this.pointerDown) {
             return;
         }
         const wasDragged = this.pointerDragged;
         this.pointerDown = false;
         this.pointerDragged = false;
         if (wasDragged) {
-            this.suppressPointerUntil = now + 180;
             return;
         }
         this.handlePointerOnce(x, y);
