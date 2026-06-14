@@ -1,0 +1,11 @@
+/build/
+/library/
+/local/
+/profiles/
+/temp/
+/library.broken-*/
+/temp.broken-*/
+/native/
+.DS_Store
+/*.log
+reference-demo.mp4
