@@ -32,6 +32,10 @@ const PURPLE = new Color(106, 49, 164, 255);
 const CYAN = new Color(22, 158, 181, 255);
 const OFFICE_WALL = new Color(48, 50, 53, 245);
 const OFFICE_WALL_ALT = new Color(57, 59, 62, 245);
+const TOWER_BOTTOM = -355;
+const TOWER_TOP = 415;
+const FLOOR_GAP = 180;
+const FLOOR_BASE_Y = -285;
 
 export interface GameHitAreas {
     floorAt(position: Vec3): number | null;
@@ -51,6 +55,7 @@ export class GameView implements GameHitAreas {
     private cabinY = 0;
     private menuOpen = false;
     private interactionMessage = '';
+    private towerScrollOffset = 0;
     private deliveryFeedback: (PassengerDeliveredEvent & { startedAt: number }) | null = null;
 
     constructor(parent: Node, events: EventBus) {
@@ -90,11 +95,12 @@ export class GameView implements GameHitAreas {
     render(model: GameModel): void {
         this.graphics.clear();
         this.hidePassengerDestinationLabels();
-        this.hideDynamicShaftLabels();
+        this.hideDynamicTowerLabels();
         this.drawBackground();
-        this.drawHeader(model);
         this.drawTower(model);
         this.drawDeliveryFeedback(model);
+        this.drawTowerViewportMasks();
+        this.drawHeader(model);
         this.drawBuildButton(model);
         if (this.menuOpen) {
             this.drawMenu(model);
@@ -116,6 +122,9 @@ export class GameView implements GameHitAreas {
     }
 
     floorAt(position: Vec3): number | null {
+        if (!this.isTowerViewport(position)) {
+            return null;
+        }
         for (let floor = 0; floor < this.floorYs.length; floor += 1) {
             if (
                 Math.abs(position.y - this.floorYs[floor]) <= this.floorHitHalfHeight
@@ -129,7 +138,24 @@ export class GameView implements GameHitAreas {
     }
 
     isCabin(position: Vec3): boolean {
-        return position.x > 195 && position.x < 340 && Math.abs(position.y - this.cabinY) < 82;
+        return this.isTowerViewport(position)
+            && position.x > 195
+            && position.x < 340
+            && Math.abs(position.y - this.cabinY) < 82;
+    }
+
+    isTowerViewport(position: Vec3): boolean {
+        return position.x > -340 && position.x < 340 && position.y > TOWER_BOTTOM && position.y < TOWER_TOP;
+    }
+
+    scrollTowerBy(deltaY: number, floorCount: number): void {
+        const naturalTop = FLOOR_BASE_Y + Math.max(0, floorCount - 1) * FLOOR_GAP;
+        const minOffset = Math.min(0, TOWER_TOP - 80 - naturalTop);
+        this.towerScrollOffset = Math.max(minOffset, Math.min(0, this.towerScrollOffset + deltaY));
+    }
+
+    resetTowerScroll(): void {
+        this.towerScrollOffset = 0;
     }
 
     isBuildButton(position: Vec3): boolean {
@@ -242,8 +268,8 @@ export class GameView implements GameHitAreas {
 
     private drawTower(model: GameModel): void {
         const floorCount = model.progress.unlockedFloors;
-        const floorGap = floorCount <= 3 ? 205 : floorCount === 4 ? 160 : 125;
-        const bottomY = -300;
+        const floorGap = FLOOR_GAP;
+        const bottomY = FLOOR_BASE_Y + this.towerScrollOffset;
         const towerLeft = -340;
         const towerRight = 340;
         const s2Left = 105;
@@ -255,6 +281,9 @@ export class GameView implements GameHitAreas {
         for (let floor = 0; floor < floorCount; floor += 1) {
             const y = bottomY + floor * floorGap;
             this.floorYs.push(y);
+            if (y + floorGap * 0.5 < TOWER_BOTTOM || y - floorGap * 0.5 > TOWER_TOP) {
+                continue;
+            }
             this.graphics.fillColor = floor % 2 === 0 ? OFFICE_WALL : OFFICE_WALL_ALT;
             this.graphics.rect(towerLeft, y - floorGap * 0.48, towerRight - towerLeft, floorGap * 0.96);
             this.graphics.fill();
@@ -274,7 +303,20 @@ export class GameView implements GameHitAreas {
 
         const elevatorY = bottomY + model.elevator.position * floorGap;
         this.cabinY = elevatorY;
-        this.drawCabin(model, s1Left, elevatorY, shaftWidth);
+        if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
+            this.drawCabin(model, s1Left, elevatorY, shaftWidth);
+        }
+    }
+
+    private drawTowerViewportMasks(): void {
+        this.graphics.fillColor = new Color(24, 26, 29, 255);
+        this.graphics.rect(-360, -640, 720, TOWER_BOTTOM + 640);
+        this.graphics.fill();
+        this.graphics.fillColor = new Color(247, 243, 237, 255);
+        this.graphics.rect(-360, TOWER_TOP, 720, 640 - TOWER_TOP);
+        this.graphics.fill();
+        this.line(-340, TOWER_BOTTOM, 340, TOWER_BOTTOM, new Color(120, 122, 126, 180), 2);
+        this.line(-340, TOWER_TOP, 340, TOWER_TOP, new Color(120, 122, 126, 180), 2);
     }
 
     private drawFloorMarker(floor: number, y: number): void {
@@ -419,7 +461,15 @@ export class GameView implements GameHitAreas {
         }
         const floorY = this.floorYs[feedback.floor];
         const passenger = model.getPassenger(feedback.passengerId);
-        if (floorY === undefined || !passenger) {
+        if (
+            floorY === undefined
+            || floorY < TOWER_BOTTOM
+            || floorY > TOWER_TOP
+            || !passenger
+        ) {
+            if (label) {
+                label.node.active = false;
+            }
             return;
         }
         const progress = Math.min(1, (Date.now() - feedback.startedAt) / 650);
@@ -443,9 +493,7 @@ export class GameView implements GameHitAreas {
         this.graphics.rect(-320, -540, 100, 110);
         this.graphics.fill();
         this.labels.build.color = PAPER;
-        this.labels.build.string = model.progress.unlockedFloors >= 6
-            ? '满层'
-            : `增层\n${model.floorExtensionCost}`;
+        this.labels.build.string = `增层\n${model.floorExtensionCost}`;
         const occupancy = model.elevatorOccupancy;
         const capacityState = model.isElevatorFull ? ' 已满' : '';
         this.labels.floorHint.string = `金币 ${model.economy.coins}    星星 ${model.economy.stars}    载客 ${occupancy}/${model.elevator.capacity}${capacityState}`;
@@ -524,9 +572,15 @@ export class GameView implements GameHitAreas {
         });
     }
 
-    private hideDynamicShaftLabels(): void {
+    private hideDynamicTowerLabels(): void {
         Object.entries(this.labels).forEach(([key, label]) => {
-            if (key.startsWith('shaft-')) {
+            if (
+                key.startsWith('shaft-')
+                || key.startsWith('floor-')
+                || key.startsWith('company-')
+                || key === 'cabin-target'
+                || key === 'deliveryCount'
+            ) {
                 label.node.active = false;
             }
         });

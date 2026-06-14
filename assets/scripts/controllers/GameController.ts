@@ -4,6 +4,12 @@ import { GameView } from '../views/GameView';
 
 export class GameController {
     private spawnTimer = 0;
+    private pointerDown = false;
+    private pointerDragged = false;
+    private pointerStartX = 0;
+    private pointerStartY = 0;
+    private pointerLastY = 0;
+    private suppressPointerUntil = 0;
     private lastPointerTime = -Infinity;
     private lastPointerX = 0;
     private lastPointerY = 0;
@@ -14,7 +20,11 @@ export class GameController {
     ) {}
 
     start(): void {
+        input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
+        input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
         input.on(Input.EventType.TOUCH_END, this.onTouchEnd, this);
+        input.on(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
+        input.on(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
         input.on(Input.EventType.MOUSE_UP, this.onMouseUp, this);
         this.seedPassengers();
         this.view.render(this.manager.model);
@@ -35,19 +45,83 @@ export class GameController {
     }
 
     dispose(): void {
+        input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
+        input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
         input.off(Input.EventType.TOUCH_END, this.onTouchEnd, this);
+        input.off(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
+        input.off(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
         input.off(Input.EventType.MOUSE_UP, this.onMouseUp, this);
         this.manager.saveNow();
     }
 
+    private onTouchStart(event: EventTouch): void {
+        const location = event.getUILocation();
+        this.beginPointer(location.x, location.y);
+    }
+
+    private onTouchMove(event: EventTouch): void {
+        const location = event.getUILocation();
+        this.movePointer(location.x, location.y);
+    }
+
     private onTouchEnd(event: EventTouch): void {
         const location = event.getUILocation();
-        this.handlePointerOnce(location.x, location.y);
+        this.endPointer(location.x, location.y);
+    }
+
+    private onMouseDown(event: EventMouse): void {
+        const location = event.getUILocation();
+        this.beginPointer(location.x, location.y);
+    }
+
+    private onMouseMove(event: EventMouse): void {
+        const location = event.getUILocation();
+        this.movePointer(location.x, location.y);
     }
 
     private onMouseUp(event: EventMouse): void {
         const location = event.getUILocation();
-        this.handlePointerOnce(location.x, location.y);
+        this.endPointer(location.x, location.y);
+    }
+
+    private beginPointer(x: number, y: number): void {
+        this.pointerDown = true;
+        this.pointerDragged = false;
+        this.pointerStartX = x;
+        this.pointerStartY = y;
+        this.pointerLastY = y;
+    }
+
+    private movePointer(x: number, y: number): void {
+        if (!this.pointerDown || this.manager.model.progress.failed || this.manager.model.progress.completed) {
+            return;
+        }
+        const startPosition = this.view.toLocalPosition(this.pointerStartX, this.pointerStartY);
+        if (!this.view.isTowerViewport(startPosition)) {
+            return;
+        }
+        if (Math.abs(x - this.pointerStartX) + Math.abs(y - this.pointerStartY) > 8) {
+            this.pointerDragged = true;
+        }
+        if (this.pointerDragged) {
+            this.view.scrollTowerBy(this.pointerLastY - y, this.manager.model.progress.unlockedFloors);
+        }
+        this.pointerLastY = y;
+    }
+
+    private endPointer(x: number, y: number): void {
+        const now = Date.now();
+        if (!this.pointerDown && now < this.suppressPointerUntil) {
+            return;
+        }
+        const wasDragged = this.pointerDragged;
+        this.pointerDown = false;
+        this.pointerDragged = false;
+        if (wasDragged) {
+            this.suppressPointerUntil = now + 180;
+            return;
+        }
+        this.handlePointerOnce(x, y);
     }
 
     private handlePointerOnce(x: number, y: number): void {
@@ -71,6 +145,7 @@ export class GameController {
             if (this.view.isRestartButton(position)) {
                 this.manager.model.restartGame();
                 this.spawnTimer = 0;
+                this.view.resetTowerScroll();
                 this.seedPassengers();
                 this.view.setInteractionMessage('重新开始运营');
                 this.manager.saveNow();
@@ -113,7 +188,7 @@ export class GameController {
         }
         if (this.view.isBuildButton(position)) {
             const built = this.manager.model.extendFloor();
-            this.view.setInteractionMessage(built ? '新楼层已解锁' : '金币不足或已达到最高楼层');
+            this.view.setInteractionMessage(built ? '新楼层已解锁，可上下拖动浏览' : '金币不足');
             return;
         }
         const floor = this.view.floorAt(position);
@@ -123,11 +198,16 @@ export class GameController {
             if (!queued && model.elevator.targetFloor === null && floor === model.elevator.currentFloor) {
                 this.view.setInteractionMessage(`S1 已在 ${floor} 层`);
             } else if (!queued) {
-                this.view.setInteractionMessage(`${floor} 层已在 S1 停靠队列中`);
+                this.view.setInteractionMessage(`无法加入 ${floor} 层指令`);
             } else if (model.isBoarding) {
                 this.view.setInteractionMessage(`已加入 ${floor} 层，等待乘客依次上车后出发`);
             } else {
-                this.view.setInteractionMessage(`S1 正在前往 ${floor} 层`);
+                const pending = model.elevator.queue.length;
+                this.view.setInteractionMessage(
+                    pending > 0
+                        ? `已追加 ${floor} 层，前方还有 ${pending} 个停站指令`
+                        : `S1 正在前往 ${floor} 层`,
+                );
             }
             return;
         }

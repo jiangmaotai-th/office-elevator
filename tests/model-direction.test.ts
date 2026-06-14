@@ -111,6 +111,39 @@ function testCallQueueRemainsFifo(): void {
     assert(model.elevator.queue[0] === 1, 'later floor calls should remain FIFO');
 }
 
+function testRepeatedFloorCommandsRunInExactClickOrder(): void {
+    const model = new GameModel();
+    model.progress.unlockedFloors = 5;
+
+    assert(model.queueFloor(2), 'the first floor command should start immediately');
+    assert(model.queueFloor(3), 'the second floor command should be appended');
+    assert(model.queueFloor(2), 'a repeated floor must remain a separate command');
+    assert(model.queueFloor(4), 'the fourth floor command should be appended');
+    assert(model.elevator.targetFloor === 2, 'the first click should remain the active target');
+    assert(
+        model.elevator.queue.join(',') === '3,2,4',
+        'the pending queue must preserve the exact 2,3,2,4 click sequence including duplicates',
+    );
+
+    const arrivals: number[] = [];
+    let previousFloor = model.elevator.currentFloor;
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (model.elevator.currentFloor !== previousFloor) {
+            previousFloor = model.elevator.currentFloor;
+            arrivals.push(previousFloor);
+        }
+        if (model.elevator.targetFloor === null && model.elevator.queue.length === 0) {
+            break;
+        }
+    }
+
+    assert(
+        arrivals.join(',') === '2,3,2,4',
+        'the elevator should autonomously stop in the exact order 2,3,2,4',
+    );
+}
+
 function testFloorRequestStartsAfterBoardingCompletes(): void {
     const model = new GameModel();
     model.createPassenger(0, 2);
@@ -236,8 +269,17 @@ function testRestartClearsFailedRun(): void {
     assert(model.elevator.currentFloor === 0, 'restart should return the elevator to the lobby');
     assert(model.elevator.targetFloor === null, 'restart should clear the active elevator target');
     assert(model.progress.elapsedSeconds === 0, 'restart should reset the game clock');
-    assert(model.progress.unlockedFloors === 3, 'restart should restore the initial floor count');
-    assert(model.economy.coins === 20, 'restart should restore the initial economy');
+    assert(model.progress.unlockedFloors === 5, 'restart should preserve constructed floors');
+    assert(model.economy.coins === 7, 'restart should preserve the current economy');
+}
+
+function testFloorExtensionHasNoArtificialSixFloorCap(): void {
+    const model = new GameModel();
+    model.progress.unlockedFloors = 6;
+    model.economy.coins = 1000;
+
+    assert(model.extendFloor(), 'floor extension should continue beyond six floors');
+    assert(model.progress.unlockedFloors === 7, 'a seventh floor should be added');
 }
 
 testManualBoardingIgnoresDirection();
@@ -245,10 +287,12 @@ testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
 testAutomaticBoardingCannotSkipQueueHead();
 testCallQueueRemainsFifo();
+testRepeatedFloorCommandsRunInExactClickOrder();
 testFloorRequestStartsAfterBoardingCompletes();
 testCurrentFloorRequestDoesNotPretendToMove();
 testElevatorCanTravelToSecondAndThirdFloors();
 testPassengersLeaveOneAtATimeWithSeparateEvents();
 testPatienceWarningAndFailureRule();
 testRestartClearsFailedRun();
+testFloorExtensionHasNoArtificialSixFloorCap();
 console.log('MODEL_DIRECTION_RULES_OK');

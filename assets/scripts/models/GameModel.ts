@@ -192,7 +192,7 @@ export class GameModel {
 
     extendFloor(): boolean {
         const cost = this.floorExtensionCost;
-        if (this.economy.coins < cost || this.progress.unlockedFloors >= 6) {
+        if (this.economy.coins < cost) {
             return false;
         }
         this.economy.coins -= cost;
@@ -225,22 +225,13 @@ export class GameModel {
         this.passengers.length = 0;
         this.resetElevatorAndQueues();
         this.nextPassengerId = 1;
-        this.economy.coins = 20;
-        this.economy.stars = 0;
         this.economy.delivered = 0;
         this.economy.lost = 0;
         this.economy.multiplier = 1;
         this.economy.multiplierProgress = 0;
-        this.progress.day = 1;
-        this.progress.level = 1;
-        this.progress.targetDeliveries = 12;
-        this.progress.unlockedFloors = MIN_FLOORS;
         this.progress.elapsedSeconds = 0;
         this.progress.completed = false;
         this.progress.failed = false;
-        this.upgrades.capacityLevel = 0;
-        this.upgrades.speedLevel = 0;
-        this.upgrades.patienceLevel = 0;
         this.applyUpgradeEffects();
     }
 
@@ -430,9 +421,6 @@ export class GameModel {
         let added = false;
         floors.forEach((floor) => {
             if (floor < 0 || floor >= this.progress.unlockedFloors) {
-                return;
-            }
-            if (elevator.targetFloor === floor || elevator.queue.includes(floor)) {
                 return;
             }
             elevator.queue.push(floor);
