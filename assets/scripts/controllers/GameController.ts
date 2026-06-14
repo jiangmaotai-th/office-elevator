@@ -68,6 +68,13 @@ export class GameController {
         const position = this.view.toLocalPosition(x, y);
 
         if (this.manager.model.progress.failed) {
+            if (this.view.isRestartButton(position)) {
+                this.manager.model.restartGame();
+                this.spawnTimer = 0;
+                this.seedPassengers();
+                this.view.setInteractionMessage('重新开始运营');
+                this.manager.saveNow();
+            }
             return;
         }
         if (this.manager.model.progress.completed) {

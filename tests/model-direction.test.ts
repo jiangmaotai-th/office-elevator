@@ -219,6 +219,27 @@ function testPatienceWarningAndFailureRule(): void {
     assert(model.elevator.position === positionBeforeFailure, 'the simulation should freeze after failure');
 }
 
+function testRestartClearsFailedRun(): void {
+    const model = new GameModel();
+    const passenger = model.createPassenger(1, 2);
+    passenger.patience = 0.01;
+    passenger.maxPatience = 1;
+    model.economy.coins = 7;
+    model.progress.unlockedFloors = 5;
+    model.update(0.02);
+
+    assert(model.progress.failed, 'the setup should enter the failed state');
+    model.restartGame();
+
+    assert(!model.progress.failed, 'restart should clear the failed state');
+    assert(model.passengers.length === 0, 'restart should remove passengers from the failed run');
+    assert(model.elevator.currentFloor === 0, 'restart should return the elevator to the lobby');
+    assert(model.elevator.targetFloor === null, 'restart should clear the active elevator target');
+    assert(model.progress.elapsedSeconds === 0, 'restart should reset the game clock');
+    assert(model.progress.unlockedFloors === 3, 'restart should restore the initial floor count');
+    assert(model.economy.coins === 20, 'restart should restore the initial economy');
+}
+
 testManualBoardingIgnoresDirection();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
@@ -229,4 +250,5 @@ testCurrentFloorRequestDoesNotPretendToMove();
 testElevatorCanTravelToSecondAndThirdFloors();
 testPassengersLeaveOneAtATimeWithSeparateEvents();
 testPatienceWarningAndFailureRule();
+testRestartClearsFailedRun();
 console.log('MODEL_DIRECTION_RULES_OK');

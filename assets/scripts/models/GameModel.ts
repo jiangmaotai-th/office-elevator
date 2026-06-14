@@ -221,6 +221,29 @@ export class GameModel {
         this.startNextDay();
     }
 
+    restartGame(): void {
+        this.passengers.length = 0;
+        this.resetElevatorAndQueues();
+        this.nextPassengerId = 1;
+        this.economy.coins = 20;
+        this.economy.stars = 0;
+        this.economy.delivered = 0;
+        this.economy.lost = 0;
+        this.economy.multiplier = 1;
+        this.economy.multiplierProgress = 0;
+        this.progress.day = 1;
+        this.progress.level = 1;
+        this.progress.targetDeliveries = 12;
+        this.progress.unlockedFloors = MIN_FLOORS;
+        this.progress.elapsedSeconds = 0;
+        this.progress.completed = false;
+        this.progress.failed = false;
+        this.upgrades.capacityLevel = 0;
+        this.upgrades.speedLevel = 0;
+        this.upgrades.patienceLevel = 0;
+        this.applyUpgradeEffects();
+    }
+
     private updatePatience(deltaTime: number): void {
         for (const passenger of this.waitingPassengers) {
             passenger.patience -= deltaTime;
@@ -445,6 +468,20 @@ export class GameModel {
 
     private startNextDay(): void {
         this.passengers.length = 0;
+        this.resetElevatorAndQueues();
+        this.progress.day += 1;
+        this.progress.level += 1;
+        this.progress.targetDeliveries += 6;
+        this.progress.elapsedSeconds = 0;
+        this.progress.completed = false;
+        this.progress.failed = false;
+        this.economy.delivered = 0;
+        this.economy.lost = 0;
+        this.economy.multiplier = 1;
+        this.economy.multiplierProgress = 0;
+    }
+
+    private resetElevatorAndQueues(): void {
         this.elevator.currentFloor = 0;
         this.elevator.targetFloor = null;
         this.elevator.position = 0;
@@ -462,15 +499,5 @@ export class GameModel {
         this.warningTimer = 0;
         this.pendingArrivalDirection = null;
         this.stopDeliveredCount = 0;
-        this.progress.day += 1;
-        this.progress.level += 1;
-        this.progress.targetDeliveries += 6;
-        this.progress.elapsedSeconds = 0;
-        this.progress.completed = false;
-        this.progress.failed = false;
-        this.economy.delivered = 0;
-        this.economy.lost = 0;
-        this.economy.multiplier = 1;
-        this.economy.multiplierProgress = 0;
     }
 }

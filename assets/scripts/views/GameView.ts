@@ -38,6 +38,7 @@ export interface GameHitAreas {
     isCabin(position: Vec3): boolean;
     isBuildButton(position: Vec3): boolean;
     isMenuButton(position: Vec3): boolean;
+    isRestartButton(position: Vec3): boolean;
     upgradeAt(position: Vec3): UpgradeType | null;
 }
 
@@ -110,6 +111,7 @@ export class GameView implements GameHitAreas {
             this.drawFailure(model);
         } else {
             this.labels.failure.node.active = false;
+            this.labels.restart.node.active = false;
         }
     }
 
@@ -136,6 +138,10 @@ export class GameView implements GameHitAreas {
 
     isMenuButton(position: Vec3): boolean {
         return position.x > 230 && position.x < 330 && position.y > 500 && position.y < 590;
+    }
+
+    isRestartButton(position: Vec3): boolean {
+        return position.x > -125 && position.x < 125 && position.y > -145 && position.y < -65;
     }
 
     upgradeAt(position: Vec3): UpgradeType | null {
@@ -182,6 +188,10 @@ export class GameView implements GameHitAreas {
         this.labels.failure.node.getComponent(UITransform)?.setContentSize(540, 180);
         this.labels.failure.lineHeight = 46;
         this.labels.failure.node.active = false;
+        this.labels.restart = this.createLabel('Restart', 26, 250, new Vec3(-125, -105));
+        this.labels.restart.node.getComponent(UITransform)?.setContentSize(250, 80);
+        this.labels.restart.horizontalAlign = Label.HorizontalAlign.CENTER;
+        this.labels.restart.node.active = false;
     }
 
     private createLabel(name: string, fontSize: number, width: number, position: Vec3): Label {
@@ -354,6 +364,9 @@ export class GameView implements GameHitAreas {
         }
 
         const elapsedRatio = Math.max(0, Math.min(1, 1 - patienceRatio));
+        if (elapsedRatio < 0.5) {
+            return;
+        }
         this.graphics.strokeColor = patienceRatio <= 0.25 ? DANGER : new Color(225, 220, 211, 170);
         this.graphics.lineWidth = 2;
         this.graphics.arc(x, y, 25, Math.PI / 2, Math.PI / 2 + Math.PI * 2 * elapsedRatio, false);
@@ -460,6 +473,12 @@ export class GameView implements GameHitAreas {
         this.labels.failure.color = PAPER;
         this.labels.failure.node.setPosition(-265, 65);
         this.labels.failure.string = `本次运营失败\n有乘客等待超时离开\n已送达 ${model.economy.delivered} 人`;
+        this.graphics.fillColor = PAPER;
+        this.graphics.roundRect(-125, -145, 250, 80, 5);
+        this.graphics.fill();
+        this.labels.restart.node.active = true;
+        this.labels.restart.color = INK;
+        this.labels.restart.string = '重新开始';
     }
 
     private drawUpgradeCard(x: number, key: UpgradeType, title: string, description: string): void {
