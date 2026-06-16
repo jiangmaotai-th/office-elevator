@@ -604,18 +604,34 @@ export class GameView implements GameHitAreas {
             if (passenger) {
                 const column = index % 3;
                 const row = Math.floor(index / 3);
+                const iconX = x + 17 + column * 22;
+                const iconY = y - 7 - row * 23;
                 this.graphics.fillColor = this.floorColor(model, passenger.destinationFloor);
-                this.graphics.roundRect(x + 17 + column * 22, y - 7 - row * 23, 14, 18, 3);
+                this.graphics.roundRect(iconX, iconY, 14, 18, 3);
                 this.graphics.fill();
                 this.drawText(
                     `cabin-passenger-${id}`,
                     this.formatFloorLabel(passenger.destinationFloor),
-                    x + 18 + column * 22,
-                    y + 2 - row * 23,
+                    iconX + 1,
+                    iconY + 9,
                     8,
                     PAPER,
                     16,
                 );
+                if (model.shouldShowPassengerTimer(passenger)) {
+                    const waitProgress = model.getPassengerWaitProgress(passenger);
+                    this.graphics.strokeColor = waitProgress >= 0.75 ? DANGER : new Color(225, 220, 211, 180);
+                    this.graphics.lineWidth = 2;
+                    this.graphics.arc(
+                        iconX + 7,
+                        iconY + 9,
+                        13,
+                        Math.PI / 2,
+                        Math.PI / 2 + Math.PI * 2 * waitProgress,
+                        false,
+                    );
+                    this.graphics.stroke();
+                }
             }
         });
     }

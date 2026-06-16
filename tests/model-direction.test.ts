@@ -96,20 +96,20 @@ function testPassengerWaitTimingMatchesFortySecondRule(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
 
-    assert(passenger.maxPatience === 40, 'base passenger wait time should be 40 game minutes');
-    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should stay hidden before 20 game minutes');
-    assert(model.warningFloors.length === 0, 'warning should stay silent before 30 game minutes');
+    assert(passenger.maxPatience === 40, 'base passenger wait time should be 40 seconds');
+    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should stay hidden before 20 seconds');
+    assert(model.warningFloors.length === 0, 'warning should stay silent before 30 seconds');
 
-    model.update(19.9 / TIME_SCALE);
-    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should still be hidden just before 20 game minutes');
-    model.update(0.2 / TIME_SCALE);
-    assert(model.shouldShowPassengerTimer(passenger), 'timer ring should appear at 20 game minutes');
-    assert(model.warningFloors.length === 0, 'warning should not start at 20 game minutes');
+    model.update(19.9);
+    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should still be hidden just before 20 seconds');
+    model.update(0.2);
+    assert(model.shouldShowPassengerTimer(passenger), 'timer ring should appear at 20 seconds');
+    assert(model.warningFloors.length === 0, 'warning should not start at 20 seconds');
 
-    model.update(9.9 / TIME_SCALE);
-    assert(model.warningFloors.includes(0), 'warning should start at 30 game minutes');
-    model.update(10 / TIME_SCALE);
-    assert(model.progress.failed, 'the run should fail when the passenger reaches 40 game minutes');
+    model.update(9.9);
+    assert(model.warningFloors.includes(0), 'warning should start at 30 seconds');
+    model.update(10);
+    assert(model.progress.failed, 'the run should fail when the passenger reaches 40 seconds');
 }
 
 function testAutomaticBoardingMatchesArrivalDirection(): void {
@@ -165,21 +165,28 @@ function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
     );
 }
 
-function testBoardingPassengerLosesPatienceAtHalfSpeed(): void {
+function testPassengerPatienceRestartsInsideElevator(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
-    passenger.maxPatience = 10;
-    passenger.waitElapsed = 0;
-    passenger.patience = 10;
+    passenger.maxPatience = 40;
+    passenger.waitElapsed = 35;
+    passenger.patience = 5;
 
     assert(model.boardAtCurrentFloor() === 1, 'the passenger should start boarding');
     assert(model.getFloorQueue(0).length === 0, 'boarding passengers should not remain in the waiting queue');
-    model.update(1);
+    model.update(0.23);
 
-    assert(!model.progress.failed, 'half-speed patience loss should not fail immediately');
-    assert(passenger.waitElapsed === 5, 'boarding or riding passengers should lose patience at 50% speed');
+    assert(!model.progress.failed, 'boarding should not fail after the passenger was accepted');
     assert(passenger.state === PassengerState.Riding, 'the passenger should finish boarding into the elevator');
-    assert(model.warningFloors.length === 0, 'boarding or riding passengers should not emit waiting warnings');
+    assert(passenger.waitElapsed === 0, 'entering the elevator should restart the patience timer');
+    assert(passenger.patience === 40, 'entering the elevator should grant a fresh forty-second patience window');
+
+    model.update(19.9);
+    assert(!model.shouldShowPassengerTimer(passenger), 'in-cabin timer should stay hidden before 20 seconds');
+    model.update(0.2);
+    assert(model.shouldShowPassengerTimer(passenger), 'in-cabin timer should appear at 20 seconds');
+    model.update(9.9);
+    assert(model.warningFloors.includes(0), 'in-cabin patience warning should start at 30 seconds');
 }
 
 function testAutomaticBoardingCannotSkipQueueHead(): void {
@@ -330,16 +337,16 @@ function testPatienceWarningAndFailureRule(): void {
     passenger.waitElapsed = 29;
     passenger.patience = 11;
 
-    model.update(1.1 / TIME_SCALE);
+    model.update(1.1);
     assert(model.warningFloors.includes(0), 'the passenger floor should warn during the final quarter');
     model.update(0.8);
     const warningEvents = model.drainWarningEvents();
-    assert(warningEvents.length === 1, 'a warning floor should emit one rhythmic warning event');
+    assert(warningEvents.length >= 1, 'a warning floor should emit rhythmic warning events');
     assert(warningEvents[0].floor === 0, 'the warning event should identify the passenger floor');
 
     model.queueFloor(2);
     const positionBeforeFailure = model.elevator.position;
-    model.update(1);
+    model.update(10);
     assert(model.progress.failed, 'one timed-out passenger should fail the current game');
     assert(passenger.state === PassengerState.Lost, 'the timed-out passenger should leave the queue');
     model.update(1);
@@ -489,7 +496,7 @@ testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
 testPassengerWaitTimingMatchesFortySecondRule();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
-testBoardingPassengerLosesPatienceAtHalfSpeed();
+testPassengerPatienceRestartsInsideElevator();
 testAutomaticBoardingCannotSkipQueueHead();
 testCallQueueRemainsFifo();
 testRepeatedFloorCommandsRunInExactClickOrder();

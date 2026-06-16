@@ -24,7 +24,7 @@ const INITIAL_UNLOCKED_FLOORS = 11;
 const DEFAULT_MAX_FLOOR = 10;
 const BOARDING_INTERVAL = 0.22;
 const UNLOADING_INTERVAL = 0.28;
-const PASSENGER_WAIT_MINUTES = 40;
+const PASSENGER_WAIT_SECONDS = 40;
 const PATIENCE_RING_RATIO = 0.5;
 const PATIENCE_WARNING_RATIO = 0.75;
 const WARNING_SOUND_INTERVAL = 0.8;
@@ -214,7 +214,7 @@ export class GameModel {
     }
 
     createPassenger(originFloor: number, destinationFloor: number): PassengerModel {
-        const maxPatience = PASSENGER_WAIT_MINUTES + this.upgrades.patienceLevel * 4;
+        const maxPatience = this.maxPassengerPatience;
         const passenger: PassengerModel = {
             id: this.nextPassengerId++,
             originFloor,
@@ -237,11 +237,19 @@ export class GameModel {
     }
 
     get warningFloors(): number[] {
-        return [...new Set(
-            this.waitingPassengers
-                .filter((passenger) => passenger.waitElapsed / passenger.maxPatience >= PATIENCE_WARNING_RATIO)
-                .map((passenger) => passenger.originFloor),
-        )];
+        const waitingWarningFloors = this.waitingPassengers
+            .filter((passenger) => passenger.waitElapsed / passenger.maxPatience >= PATIENCE_WARNING_RATIO)
+            .map((passenger) => passenger.originFloor);
+        const elevatorWarningFloors = this.elevators
+            .filter((elevator) => {
+                return elevator.passengers.some((id) => {
+                    const passenger = this.getPassenger(id);
+                    return !!passenger
+                        && passenger.waitElapsed / passenger.maxPatience >= PATIENCE_WARNING_RATIO;
+                });
+            })
+            .map((elevator) => elevator.currentFloor);
+        return [...new Set([...waitingWarningFloors, ...elevatorWarningFloors])];
     }
 
     getPassengerWaitProgress(passenger: PassengerModel): number {
@@ -436,10 +444,9 @@ export class GameModel {
         const gameMinutes = deltaTime * TIME_SCALE;
         this.progress.gameTime += gameMinutes;
         this.updateTraffic(gameMinutes);
-        this.updatePatience(gameMinutes, PassengerState.Waiting, 1);
-        this.updatePatience(gameMinutes, PassengerState.Boarding, 0.5);
-        this.updatePatience(gameMinutes, PassengerState.Riding, 0.5);
-        this.updatePatience(gameMinutes, PassengerState.Exiting, 0.5);
+        this.updatePatience(deltaTime, PassengerState.Waiting);
+        this.updatePatience(deltaTime, PassengerState.Riding);
+        this.updatePatience(deltaTime, PassengerState.Exiting);
         if (this.progress.failed) {
             return;
         }
@@ -502,9 +509,9 @@ export class GameModel {
         this.applyUpgradeEffects();
     }
 
-    private updatePatience(gameMinutes: number, state: PassengerState, rate: number): void {
+    private updatePatience(deltaTime: number, state: PassengerState): void {
         for (const passenger of this.passengers.filter((candidate) => candidate.state === state)) {
-            passenger.waitElapsed += gameMinutes * rate;
+            passenger.waitElapsed += deltaTime;
             passenger.patience = Math.max(0, passenger.maxPatience - passenger.waitElapsed);
             if (passenger.waitElapsed < passenger.maxPatience) {
                 continue;
@@ -621,6 +628,7 @@ export class GameModel {
                 continue;
             }
             passenger.state = PassengerState.Riding;
+            this.resetPassengerPatience(passenger);
             this.elevators[elevatorIndex].passengers.push(passenger.id);
             this.boardedEvents.push({
                 passengerId: passenger.id,
@@ -715,6 +723,16 @@ export class GameModel {
         this.elevators.forEach((elevator) => {
             elevator.capacity = 6 + this.upgrades.capacityLevel;
         });
+    }
+
+    private get maxPassengerPatience(): number {
+        return PASSENGER_WAIT_SECONDS + this.upgrades.patienceLevel * 4;
+    }
+
+    private resetPassengerPatience(passenger: PassengerModel): void {
+        passenger.maxPatience = this.maxPassengerPatience;
+        passenger.waitElapsed = 0;
+        passenger.patience = passenger.maxPatience;
     }
 
     private boardPassengersAtCurrentFloor(
