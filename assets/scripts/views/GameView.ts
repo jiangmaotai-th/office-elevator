@@ -56,6 +56,7 @@ export class GameView implements GameHitAreas {
     private floorHitHalfHeight = 52;
     private clickableFloors = 0;
     private readonly cabinHitAreas: Array<{ index: number; x: number; y: number; width: number; height: number }> = [];
+    private activeElevatorIndex = 0;
     private menuOpen = false;
     private interactionMessage = '';
     private towerScrollOffset = 0;
@@ -166,6 +167,10 @@ export class GameView implements GameHitAreas {
 
     resetTowerScroll(): void {
         this.towerScrollOffset = 0;
+    }
+
+    setActiveElevator(index: number): void {
+        this.activeElevatorIndex = index;
     }
 
     isBuildButton(position: Vec3): boolean {
@@ -455,6 +460,10 @@ export class GameView implements GameHitAreas {
         width: number,
     ): void {
         this.cabinHitAreas.push({ index: elevatorIndex, x, y, width, height: 164 });
+        const selected = elevatorIndex === this.activeElevatorIndex;
+        if (selected) {
+            this.strokeRect(x, y - 62, width, 136, GOLD, 4);
+        }
         this.graphics.fillColor = new Color(194, 199, 203, 255);
         this.graphics.strokeColor = new Color(15, 16, 18, 255);
         this.graphics.lineWidth = 3;
@@ -477,7 +486,7 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.drawText(
             `cabin-target-${elevatorIndex}`,
-            target === null ? elevator.id : `${direction}${target}`,
+            target === null ? `${selected ? '●' : ''}${elevator.id}` : `${direction}${target}`,
             x + 37,
             y + 66,
             14,

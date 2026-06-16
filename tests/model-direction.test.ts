@@ -61,6 +61,8 @@ function testAutomaticBoardingMatchesArrivalDirection(): void {
 function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
     const model = new GameModel();
     model.elevator.capacity = 2;
+    model.elevator2.currentFloor = 1;
+    model.elevator2.position = 1;
     const first = model.createPassenger(0, 1);
     const second = model.createPassenger(0, 2);
     const third = model.createPassenger(0, 1);
@@ -282,7 +284,7 @@ function testFloorExtensionHasNoArtificialSixFloorCap(): void {
     assert(model.progress.unlockedFloors === 7, 'a seventh floor should be added');
 }
 
-function testSecondElevatorCanTakeOverflowQueue(): void {
+function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
     const model = new GameModel();
     model.elevators[0].capacity = 5;
     model.elevators[1].capacity = 5;
@@ -290,19 +292,22 @@ function testSecondElevatorCanTakeOverflowQueue(): void {
         model.createPassenger(0, 2);
     }
 
-    assert(model.boardAtElevator(0) === 5, 'the first elevator should board only up to its capacity');
+    assert(model.boardAtElevator(0) === 10, 'both elevators should reserve the whole queue when both are open on the same floor');
     for (let i = 0; i < 5; i += 1) {
         model.update(0.25);
     }
     assert(model.elevators[0].passengers.length === 5, 'the first elevator should contain five passengers');
-    assert(model.getFloorQueue(0).length === 5, 'five passengers should remain waiting in FIFO order');
-
-    assert(model.boardAtElevator(1) === 5, 'the second elevator should take the remaining queue');
-    for (let i = 0; i < 5; i += 1) {
-        model.update(0.25);
-    }
     assert(model.elevators[1].passengers.length === 5, 'the second elevator should contain five passengers');
     assert(model.getFloorQueue(0).length === 0, 'no passenger should remain waiting after both cabins board');
+}
+
+function testFloorCommandsStayOnExplicitElevator(): void {
+    const model = new GameModel();
+    model.progress.unlockedFloors = 5;
+
+    assert(model.queueFloorForElevator(4, 1), 'S2 should accept an explicit floor command');
+    assert(model.elevators[0].targetFloor === null, 'S1 must not receive commands intended for S2');
+    assert(model.elevators[1].targetFloor === 4, 'S2 should move to the clicked floor');
 }
 
 testManualBoardingIgnoresDirection();
@@ -318,5 +323,6 @@ testPassengersLeaveOneAtATimeWithSeparateEvents();
 testPatienceWarningAndFailureRule();
 testRestartClearsFailedRun();
 testFloorExtensionHasNoArtificialSixFloorCap();
-testSecondElevatorCanTakeOverflowQueue();
+testSecondElevatorTakesOverflowWhenBothCabinsShareFloor();
+testFloorCommandsStayOnExplicitElevator();
 console.log('MODEL_DIRECTION_RULES_OK');

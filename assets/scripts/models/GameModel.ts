@@ -197,27 +197,6 @@ export class GameModel {
         return this.queueFloorForElevator(floor, 0);
     }
 
-    queueFloorForBestElevator(floor: number): number | null {
-        if (floor < 0 || floor >= this.progress.unlockedFloors) {
-            return null;
-        }
-        let bestIndex = 0;
-        let bestScore = Number.POSITIVE_INFINITY;
-        this.elevators.forEach((elevator, index) => {
-            const workload = elevator.queue.length
-                + (elevator.targetFloor === null ? 0 : 1)
-                + this.boardingQueues[index].length
-                + this.unloadingQueues[index].length;
-            const distance = Math.abs((elevator.targetFloor ?? elevator.position) - floor);
-            const score = workload * 100 + distance;
-            if (score < bestScore) {
-                bestScore = score;
-                bestIndex = index;
-            }
-        });
-        return this.queueFloorForElevator(floor, bestIndex) ? bestIndex : null;
-    }
-
     queueFloorForElevator(floor: number, elevatorIndex: number): boolean {
         const elevator = this.elevators[elevatorIndex];
         if (floor < 0 || floor >= this.progress.unlockedFloors) {
@@ -238,7 +217,24 @@ export class GameModel {
     }
 
     boardAtElevator(elevatorIndex: number): number {
-        return this.boardPassengersAtCurrentFloor(elevatorIndex, () => true);
+        const boarded = this.boardPassengersAtCurrentFloor(elevatorIndex, () => true);
+        const elevator = this.elevators[elevatorIndex];
+        if (!elevator || this.elevatorOccupancyAt(elevatorIndex) < elevator.capacity) {
+            return boarded;
+        }
+
+        const overflowIndex = this.elevators.findIndex((other, index) => {
+            return index !== elevatorIndex
+                && other.currentFloor === elevator.currentFloor
+                && Math.abs(other.position - elevator.position) < 0.001
+                && other.doorOpen
+                && this.unloadingQueues[index].length === 0
+                && !this.isElevatorFullAt(index);
+        });
+        if (overflowIndex < 0) {
+            return boarded;
+        }
+        return boarded + this.boardPassengersAtCurrentFloor(overflowIndex, () => true);
     }
 
     update(deltaTime: number): void {
@@ -479,9 +475,11 @@ export class GameModel {
             return 0;
         }
         const boarding: PassengerModel[] = [];
-        const floorQueue = this.getFloorQueue(elevator.currentFloor);
+        const floorQueue = this.getFloorQueue(elevator.currentFloor).filter((passenger) => {
+            return passenger.state === PassengerState.Waiting;
+        });
         for (const passenger of floorQueue) {
-            if (boarding.length >= room || passenger.state !== PassengerState.Waiting) {
+            if (boarding.length >= room) {
                 break;
             }
             // A strict FIFO queue cannot skip a passenger whose direction is incompatible.
