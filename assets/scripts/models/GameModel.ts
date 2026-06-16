@@ -19,6 +19,7 @@ const UNLOADING_INTERVAL = 0.28;
 const PATIENCE_WARNING_RATIO = 0.25;
 const WARNING_SOUND_INTERVAL = 0.8;
 const ELEVATOR_COUNT = 2;
+const DELIVERY_SCORE_BASE = 10;
 
 export class GameModel {
     readonly passengers: PassengerModel[] = [];
@@ -53,6 +54,8 @@ export class GameModel {
     readonly economy: EconomyModel = {
         coins: 20,
         stars: 0,
+        score: 0,
+        bestScore: 0,
         delivered: 0,
         lost: 0,
         multiplier: 1,
@@ -64,6 +67,7 @@ export class GameModel {
         targetDeliveries: 12,
         unlockedFloors: MIN_FLOORS,
         elapsedSeconds: 0,
+        started: false,
         completed: false,
         failed: false,
     };
@@ -95,6 +99,9 @@ export class GameModel {
         Object.assign(this.economy, snapshot.economy);
         Object.assign(this.progress, snapshot.progress);
         Object.assign(this.upgrades, snapshot.upgrades ?? {});
+        this.economy.score ??= 0;
+        this.economy.bestScore ??= this.economy.score;
+        this.progress.started ??= false;
         this.applyUpgradeEffects();
         this.progress.completed = false;
         this.progress.failed = false;
@@ -212,6 +219,13 @@ export class GameModel {
         return this.enqueueStops([floor], elevatorIndex);
     }
 
+    startRun(): void {
+        if (this.progress.completed || this.progress.failed) {
+            return;
+        }
+        this.progress.started = true;
+    }
+
     boardAtCurrentFloor(): number {
         return this.boardAtElevator(0);
     }
@@ -238,7 +252,7 @@ export class GameModel {
     }
 
     update(deltaTime: number): void {
-        if (this.progress.completed || this.progress.failed) {
+        if (!this.progress.started || this.progress.completed || this.progress.failed) {
             return;
         }
         this.progress.elapsedSeconds += deltaTime;
@@ -293,9 +307,11 @@ export class GameModel {
         this.nextPassengerId = 1;
         this.economy.delivered = 0;
         this.economy.lost = 0;
+        this.economy.score = 0;
         this.economy.multiplier = 1;
         this.economy.multiplierProgress = 0;
         this.progress.elapsedSeconds = 0;
+        this.progress.started = false;
         this.progress.completed = false;
         this.progress.failed = false;
         this.applyUpgradeEffects();
@@ -425,6 +441,10 @@ export class GameModel {
             this.economy.multiplierProgress += patienceRatio >= 0.6 ? 2 : 1;
             this.economy.delivered += 1;
             this.economy.coins += this.economy.multiplier;
+            const quickDeliveryBonus = patienceRatio >= 0.6 ? 1.5 : 1;
+            const scoreGain = Math.round(DELIVERY_SCORE_BASE * this.economy.multiplier * quickDeliveryBonus);
+            this.economy.score += scoreGain;
+            this.economy.bestScore = Math.max(this.economy.bestScore, this.economy.score);
             this.stopDeliveredCounts[elevatorIndex] += 1;
             this.deliveredEvents.push({
                 passengerId: passenger.id,
@@ -542,10 +562,12 @@ export class GameModel {
         this.progress.level += 1;
         this.progress.targetDeliveries += 6;
         this.progress.elapsedSeconds = 0;
+        this.progress.started = false;
         this.progress.completed = false;
         this.progress.failed = false;
         this.economy.delivered = 0;
         this.economy.lost = 0;
+        this.economy.score = 0;
         this.economy.multiplier = 1;
         this.economy.multiplierProgress = 0;
     }

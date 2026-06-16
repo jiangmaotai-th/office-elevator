@@ -7,6 +7,12 @@ function assert(condition: boolean, message: string): void {
     }
 }
 
+function createRunningModel(): GameModel {
+    const model = new GameModel();
+    model.startRun();
+    return model;
+}
+
 function runUntilIdle(model: GameModel, maxSeconds = 20): void {
     for (let elapsed = 0; elapsed < maxSeconds; elapsed += 0.05) {
         model.update(0.05);
@@ -17,8 +23,26 @@ function runUntilIdle(model: GameModel, maxSeconds = 20): void {
     throw new Error('elevator did not become idle');
 }
 
-function testManualBoardingIgnoresDirection(): void {
+function testRunWaitsForExplicitStart(): void {
     const model = new GameModel();
+    const passenger = model.createPassenger(0, 2);
+    passenger.maxPatience = 1;
+    passenger.patience = 0.01;
+
+    model.update(1);
+
+    assert(!model.progress.started, 'new games should wait for an explicit start');
+    assert(model.progress.elapsedSeconds === 0, 'the clock must not run before start');
+    assert(!model.progress.failed, 'waiting passengers must not time out before start');
+    assert(passenger.patience === 0.01, 'passenger patience must be frozen before start');
+
+    model.startRun();
+    model.update(0.02);
+    assert(model.progress.failed, 'after start, patience should resume and can fail the run');
+}
+
+function testManualBoardingIgnoresDirection(): void {
+    const model = createRunningModel();
     model.elevator.currentFloor = 1;
     model.elevator.position = 1;
     const up = model.createPassenger(1, 2);
@@ -43,7 +67,7 @@ function testManualBoardingIgnoresDirection(): void {
 }
 
 function testAutomaticBoardingMatchesArrivalDirection(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     const sameDirection = model.createPassenger(1, 2);
     const oppositeDirection = model.createPassenger(1, 0);
 
@@ -59,7 +83,7 @@ function testAutomaticBoardingMatchesArrivalDirection(): void {
 }
 
 function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.elevator.capacity = 2;
     model.elevator2.currentFloor = 1;
     model.elevator2.position = 1;
@@ -96,7 +120,7 @@ function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
 }
 
 function testBoardingPassengerCannotTimeout(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 1;
     passenger.patience = 0.01;
@@ -111,7 +135,7 @@ function testBoardingPassengerCannotTimeout(): void {
 }
 
 function testAutomaticBoardingCannotSkipQueueHead(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     const oppositeDirection = model.createPassenger(1, 0);
     const sameDirection = model.createPassenger(1, 2);
 
@@ -124,7 +148,7 @@ function testAutomaticBoardingCannotSkipQueueHead(): void {
 }
 
 function testCallQueueRemainsFifo(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.queueFloor(2);
     model.queueFloor(1);
 
@@ -133,7 +157,7 @@ function testCallQueueRemainsFifo(): void {
 }
 
 function testRepeatedFloorCommandsRunInExactClickOrder(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.progress.unlockedFloors = 5;
 
     assert(model.queueFloor(2), 'the first floor command should start immediately');
@@ -166,7 +190,7 @@ function testRepeatedFloorCommandsRunInExactClickOrder(): void {
 }
 
 function testFloorRequestStartsAfterBoardingCompletes(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.createPassenger(0, 2);
     model.createPassenger(0, 1);
     model.boardAtCurrentFloor();
@@ -184,7 +208,7 @@ function testFloorRequestStartsAfterBoardingCompletes(): void {
 }
 
 function testCurrentFloorRequestDoesNotPretendToMove(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
 
     const queued = model.queueFloor(0);
 
@@ -193,7 +217,7 @@ function testCurrentFloorRequestDoesNotPretendToMove(): void {
 }
 
 function testElevatorCanTravelToSecondAndThirdFloors(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.progress.unlockedFloors = 4;
 
     assert(model.queueFloor(2), 'floor 2 should accept a request');
@@ -214,7 +238,7 @@ function testElevatorCanTravelToSecondAndThirdFloors(): void {
 }
 
 function testPassengersLeaveOneAtATimeWithSeparateEvents(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     const first = model.createPassenger(0, 1);
     const second = model.createPassenger(0, 1);
     first.state = PassengerState.Riding;
@@ -252,7 +276,7 @@ function testPassengersLeaveOneAtATimeWithSeparateEvents(): void {
 }
 
 function testPatienceWarningAndFailureRule(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 4;
     passenger.patience = 1.1;
@@ -274,7 +298,7 @@ function testPatienceWarningAndFailureRule(): void {
 }
 
 function testRestartClearsFailedRun(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     const passenger = model.createPassenger(1, 2);
     passenger.patience = 0.01;
     passenger.maxPatience = 1;
@@ -295,7 +319,7 @@ function testRestartClearsFailedRun(): void {
 }
 
 function testFloorExtensionHasNoArtificialSixFloorCap(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.progress.unlockedFloors = 6;
     model.economy.coins = 1000;
 
@@ -304,7 +328,7 @@ function testFloorExtensionHasNoArtificialSixFloorCap(): void {
 }
 
 function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.elevators[0].capacity = 5;
     model.elevators[1].capacity = 5;
     for (let i = 0; i < 10; i += 1) {
@@ -321,7 +345,7 @@ function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
 }
 
 function testFloorCommandsStayOnExplicitElevator(): void {
-    const model = new GameModel();
+    const model = createRunningModel();
     model.progress.unlockedFloors = 5;
 
     assert(model.queueFloorForElevator(4, 1), 'S2 should accept an explicit floor command');
@@ -329,6 +353,54 @@ function testFloorCommandsStayOnExplicitElevator(): void {
     assert(model.elevators[1].targetFloor === 4, 'S2 should move to the clicked floor');
 }
 
+function testExplicitElevatorQueueSurvivesControlSwitch(): void {
+    const model = createRunningModel();
+    model.progress.unlockedFloors = 6;
+
+    assert(model.queueFloorForElevator(2, 0), 'S1 should start toward floor 2');
+    assert(model.queueFloorForElevator(4, 0), 'S1 should append floor 4 while moving');
+    assert(model.queueFloorForElevator(5, 0), 'S1 should append floor 5 while moving');
+    assert(model.queueFloorForElevator(3, 0), 'S1 should append floor 3 while moving');
+    assert(model.queueFloorForElevator(1, 1), 'S2 should accept its own command after control switches');
+
+    assert(model.elevators[0].targetFloor === 2, 'S1 active target should stay at the first clicked floor');
+    assert(model.elevators[0].queue.join(',') === '4,5,3', 'S1 pending stops must preserve 4,5,3');
+    assert(model.elevators[1].targetFloor === 1, 'S2 should move independently');
+
+    const s1Arrivals: number[] = [];
+    let previousS1Floor = model.elevators[0].currentFloor;
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (model.elevators[0].currentFloor !== previousS1Floor) {
+            previousS1Floor = model.elevators[0].currentFloor;
+            s1Arrivals.push(previousS1Floor);
+        }
+        if (model.elevators[0].targetFloor === null && model.elevators[0].queue.length === 0) {
+            break;
+        }
+    }
+
+    assert(s1Arrivals.join(',') === '2,4,5,3', 'S1 should continue 2,4,5,3 after S2 is controlled');
+}
+
+function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
+    const model = createRunningModel();
+    const passenger = model.createPassenger(0, 1);
+    passenger.patience = passenger.maxPatience;
+    passenger.state = PassengerState.Riding;
+    model.elevator.passengers = [passenger.id];
+
+    model.queueFloor(1);
+    runUntilIdle(model);
+    model.update(0.29);
+
+    assert(model.economy.delivered === 1, 'delivery should count toward the run');
+    assert(model.economy.score === 15, 'high-patience delivery should score base points with the speed bonus');
+    assert(model.economy.bestScore === 15, 'best score should track the highest run score');
+    assert(model.economy.multiplierProgress === 2, 'high-patience delivery should fill multiplier progress faster');
+}
+
+testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
@@ -345,4 +417,6 @@ testRestartClearsFailedRun();
 testFloorExtensionHasNoArtificialSixFloorCap();
 testSecondElevatorTakesOverflowWhenBothCabinsShareFloor();
 testFloorCommandsStayOnExplicitElevator();
+testExplicitElevatorQueueSurvivesControlSwitch();
+testDeliveryAddsRunScoreAndMultiplierProgress();
 console.log('MODEL_DIRECTION_RULES_OK');

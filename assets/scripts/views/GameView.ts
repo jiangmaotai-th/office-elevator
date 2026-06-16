@@ -31,6 +31,20 @@ const DANGER = new Color(193, 92, 83, 255);
 const RED = new Color(205, 42, 47, 255);
 const PURPLE = new Color(106, 49, 164, 255);
 const CYAN = new Color(22, 158, 181, 255);
+const DESTINATION_COLORS = [
+    PURPLE,
+    GOLD,
+    GREEN,
+    BLUE,
+    RED,
+    CYAN,
+    new Color(231, 92, 137, 255),
+    new Color(64, 131, 102, 255),
+    new Color(224, 104, 50, 255),
+    new Color(80, 82, 190, 255),
+    new Color(142, 89, 42, 255),
+    new Color(38, 165, 135, 255),
+];
 const OFFICE_WALL = new Color(48, 50, 53, 245);
 const OFFICE_WALL_ALT = new Color(57, 59, 62, 245);
 const TOWER_BOTTOM = -425;
@@ -43,6 +57,7 @@ export interface GameHitAreas {
     floorAt(position: Vec3): number | null;
     isCabin(position: Vec3): boolean;
     isBuildButton(position: Vec3): boolean;
+    isStartButton(position: Vec3): boolean;
     isMenuButton(position: Vec3): boolean;
     isRestartButton(position: Vec3): boolean;
     upgradeAt(position: Vec3): UpgradeType | null;
@@ -111,6 +126,11 @@ export class GameView implements GameHitAreas {
         } else {
             this.setMenuLabelsActive(false);
         }
+        if (!model.progress.started && !model.progress.failed && !model.progress.completed) {
+            this.drawStartPrompt(model);
+        } else {
+            this.labels.start.node.active = false;
+        }
         if (model.progress.completed) {
             this.drawCompletion(model);
         } else {
@@ -177,6 +197,10 @@ export class GameView implements GameHitAreas {
         return position.x > -320 && position.x < -220 && position.y > -540 && position.y < -430;
     }
 
+    isStartButton(position: Vec3): boolean {
+        return position.x > -105 && position.x < 135 && position.y > -560 && position.y < -480;
+    }
+
     isMenuButton(position: Vec3): boolean {
         return position.x > 230 && position.x < 330 && position.y > 500 && position.y < 590;
     }
@@ -233,6 +257,10 @@ export class GameView implements GameHitAreas {
         this.labels.restart.node.getComponent(UITransform)?.setContentSize(250, 80);
         this.labels.restart.horizontalAlign = Label.HorizontalAlign.CENTER;
         this.labels.restart.node.active = false;
+        this.labels.start = this.createLabel('Start', 26, 240, new Vec3(-100, -520));
+        this.labels.start.node.getComponent(UITransform)?.setContentSize(240, 80);
+        this.labels.start.horizontalAlign = Label.HorizontalAlign.CENTER;
+        this.labels.start.node.active = false;
     }
 
     private createLabel(name: string, fontSize: number, width: number, position: Vec3): Label {
@@ -269,7 +297,9 @@ export class GameView implements GameHitAreas {
         this.labels.day.string = `第${model.progress.day}天    等级${model.progress.level}`;
         this.labels.stats.string = `${model.economy.delivered}  已送达    ${model.waitingPassengers.length}  等待中`;
         this.labels.menu.string = '菜单';
-        this.labels.notice.string = this.interactionMessage || (model.economy.multiplier > 1
+        this.labels.notice.string = this.interactionMessage || (!model.progress.started
+            ? '点击开始运营后，乘客才会出现和倒计时'
+            : model.economy.multiplier > 1
             ? `${model.economy.multiplier}X  连续高耐心送达`
             : '点击楼层呼叫 S1，到达后点击轿厢让上班族依次进入');
 
@@ -427,6 +457,15 @@ export class GameView implements GameHitAreas {
         this.graphics.fillColor = clothingColor;
         this.graphics.roundRect(x - 10, y - 10, 20, 20, 4);
         this.graphics.fill();
+        this.drawText(
+            `passenger-destination-${passenger.id}`,
+            String(passenger.destinationFloor).padStart(2, '0'),
+            x - 11,
+            y - 4,
+            10,
+            PAPER,
+            24,
+        );
         this.graphics.fillColor = INK;
         if (female) {
             this.graphics.moveTo(x - 10, y - 8);
@@ -502,6 +541,15 @@ export class GameView implements GameHitAreas {
                 this.graphics.fillColor = this.floorColor(passenger.destinationFloor);
                 this.graphics.roundRect(x + 17 + column * 22, y - 7 - row * 23, 14, 18, 3);
                 this.graphics.fill();
+                this.drawText(
+                    `cabin-passenger-${id}`,
+                    String(passenger.destinationFloor),
+                    x + 18 + column * 22,
+                    y + 2 - row * 23,
+                    8,
+                    PAPER,
+                    16,
+                );
             }
         });
     }
@@ -554,7 +602,30 @@ export class GameView implements GameHitAreas {
             return sum + model.elevatorOccupancyAt(index);
         }, 0);
         const capacity = model.elevators.reduce((sum, elevator) => sum + elevator.capacity, 0);
-        this.labels.floorHint.string = `金币 ${model.economy.coins}    星星 ${model.economy.stars}    载客 ${occupancy}/${capacity}`;
+        this.labels.floorHint.string = `分数 ${model.economy.score}    ${model.economy.multiplier}X    金币 ${model.economy.coins}    载客 ${occupancy}/${capacity}`;
+    }
+
+    private drawStartPrompt(model: GameModel): void {
+        this.graphics.fillColor = new Color(247, 242, 234, 218);
+        this.graphics.roundRect(-300, -120, 600, 220, 8);
+        this.graphics.fill();
+        this.strokeRect(-300, -120, 600, 220, INK, 2);
+        this.drawText('start-title', '写字楼电梯调度', -230, 45, 34, INK, 460);
+        this.drawText(
+            'start-desc',
+            `选择 S1 或 S2 后，连续点击楼层会按顺序停站\n本局目标 ${model.progress.targetDeliveries} 人 · 最高分 ${model.economy.bestScore}`,
+            -230,
+            -20,
+            20,
+            MUTED,
+            480,
+        );
+        this.graphics.fillColor = INK;
+        this.graphics.roundRect(-105, -560, 240, 80, 5);
+        this.graphics.fill();
+        this.labels.start.node.active = true;
+        this.labels.start.color = PAPER;
+        this.labels.start.string = '开始运营';
     }
 
     private drawCompletion(model: GameModel): void {
@@ -564,7 +635,7 @@ export class GameView implements GameHitAreas {
         this.strokeRect(-320, -180, 640, 360, INK, 3);
         this.labels.complete.node.active = true;
         this.labels.complete.node.setPosition(-275, 105);
-        this.labels.complete.string = `运营升级 · 选择一项`;
+        this.labels.complete.string = `运营升级 · 分数 ${model.economy.score}`;
         this.drawUpgradeCard(-290, UpgradeType.Capacity, '扩容', `每部容量 +1\n当前 ${model.elevator.capacity}`);
         this.drawUpgradeCard(-95, UpgradeType.Speed, '提速', `运行速度 +15%\n等级 ${model.upgrades.speedLevel}`);
         this.drawUpgradeCard(100, UpgradeType.Patience, '安抚', `耐心上限 +4秒\n等级 ${model.upgrades.patienceLevel}`);
@@ -578,7 +649,7 @@ export class GameView implements GameHitAreas {
         this.labels.failure.node.active = true;
         this.labels.failure.color = PAPER;
         this.labels.failure.node.setPosition(-265, 65);
-        this.labels.failure.string = `本次运营失败\n有乘客等待超时离开\n已送达 ${model.economy.delivered} 人`;
+        this.labels.failure.string = `本次运营失败\n有乘客等待超时离开\n分数 ${model.economy.score} · 已送达 ${model.economy.delivered} 人`;
         this.graphics.fillColor = PAPER;
         this.graphics.roundRect(-125, -145, 250, 80, 5);
         this.graphics.fill();
@@ -637,6 +708,8 @@ export class GameView implements GameHitAreas {
                 || key.startsWith('floor-')
                 || key.startsWith('company-')
                 || key.startsWith('cabin-target-')
+                || key.startsWith('cabin-passenger-')
+                || key.startsWith('start-')
                 || key === 'deliveryCount'
             ) {
                 label.node.active = false;
@@ -645,7 +718,7 @@ export class GameView implements GameHitAreas {
     }
 
     private floorColor(floor: number): Color {
-        return [PURPLE, GOLD, GREEN, BLUE, RED, CYAN][floor % 6];
+        return DESTINATION_COLORS[floor % DESTINATION_COLORS.length];
     }
 
     private drawDestinationShape(floor: number, x: number, y: number, radius: number, color?: Color): void {

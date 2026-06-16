@@ -55,6 +55,8 @@ export interface ElevatorModel {
 export interface EconomyModel {
     coins: number;
     stars: number;
+    score: number;
+    bestScore: number;
     delivered: number;
     lost: number;
     multiplier: number;
@@ -67,6 +69,7 @@ export interface ProgressModel {
     targetDeliveries: number;
     unlockedFloors: number;
     elapsedSeconds: number;
+    started: boolean;
     completed: boolean;
     failed: boolean;
 }

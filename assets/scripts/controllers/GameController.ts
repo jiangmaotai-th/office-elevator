@@ -28,22 +28,24 @@ export class GameController {
         input.on(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
         input.on(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
         input.on(Input.EventType.MOUSE_UP, this.onMouseUp, this);
-        this.seedPassengers();
         this.view.render(this.manager.model);
     }
 
     update(deltaTime: number): void {
         this.manager.update(deltaTime);
+        const model = this.manager.model;
+        if (!model.progress.started || model.progress.completed || model.progress.failed) {
+            this.view.render(model);
+            return;
+        }
         this.spawnTimer += deltaTime;
         if (
             this.spawnTimer >= 3.2
-            && !this.manager.model.progress.completed
-            && !this.manager.model.progress.failed
         ) {
             this.spawnTimer = 0;
             this.spawnPassenger();
         }
-        this.view.render(this.manager.model);
+        this.view.render(model);
     }
 
     dispose(): void {
@@ -167,8 +169,7 @@ export class GameController {
                 this.manager.model.restartGame();
                 this.spawnTimer = 0;
                 this.view.resetTowerScroll();
-                this.seedPassengers();
-                this.view.setInteractionMessage('重新开始运营');
+                this.view.setInteractionMessage('准备重新开始，点击开始运营');
                 this.manager.saveNow();
             }
             return;
@@ -177,9 +178,23 @@ export class GameController {
             const upgrade = this.view.upgradeAt(position);
             if (upgrade) {
                 this.manager.model.chooseUpgrade(upgrade);
-                this.seedPassengers();
                 this.manager.saveNow();
-                this.view.setInteractionMessage('升级完成，进入下一天');
+                this.view.setInteractionMessage('升级完成，点击开始下一天');
+            }
+            return;
+        }
+        if (!this.manager.model.progress.started) {
+            if (this.view.isStartButton(position)) {
+                this.manager.model.startRun();
+                this.spawnTimer = 0;
+                this.seedPassengers();
+                this.view.setInteractionMessage('运营开始，先选择 S1 或 S2 再点击楼层');
+                this.manager.saveNow();
+            } else if (this.view.isBuildButton(position)) {
+                const built = this.manager.model.extendFloor();
+                this.view.setInteractionMessage(built ? '新楼层已解锁，可上下拖动浏览' : '金币不足');
+            } else {
+                this.view.setInteractionMessage('点击开始运营后，乘客才会出现和倒计时');
             }
             return;
         }
