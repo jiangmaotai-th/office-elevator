@@ -77,6 +77,10 @@ function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
     assert(third.state === PassengerState.Waiting, 'the third passenger should wait when the cabin is full');
     assert(fourth.state === PassengerState.Waiting, 'the fourth passenger should wait behind the third');
     assert(model.isElevatorFull, 'boarding passengers must count toward capacity immediately');
+    assert(
+        model.getFloorQueue(0).map((passenger) => passenger.id).join(',') === `${third.id},${fourth.id}`,
+        'passengers reserved for boarding should leave the visible waiting queue immediately',
+    );
     assert(model.boardAtCurrentFloor() === 0, 'a full cabin must reject another boarding request');
 
     model.update(0.23);
@@ -89,6 +93,21 @@ function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
         model.getFloorQueue(0).map((passenger) => passenger.id).join(',') === `${third.id},${fourth.id}`,
         'remaining passengers must preserve FIFO order and move toward the front',
     );
+}
+
+function testBoardingPassengerCannotTimeout(): void {
+    const model = new GameModel();
+    const passenger = model.createPassenger(0, 2);
+    passenger.maxPatience = 1;
+    passenger.patience = 0.01;
+
+    assert(model.boardAtCurrentFloor() === 1, 'the passenger should start boarding');
+    assert(model.getFloorQueue(0).length === 0, 'boarding passengers should not remain in the waiting queue');
+    model.update(0.5);
+
+    assert(!model.progress.failed, 'a passenger already boarding must not fail the run');
+    assert(passenger.state === PassengerState.Riding, 'the passenger should finish boarding into the elevator');
+    assert(model.warningFloors.length === 0, 'boarding or riding passengers should not emit waiting warnings');
 }
 
 function testAutomaticBoardingCannotSkipQueueHead(): void {
@@ -313,6 +332,7 @@ function testFloorCommandsStayOnExplicitElevator(): void {
 testManualBoardingIgnoresDirection();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
+testBoardingPassengerCannotTimeout();
 testAutomaticBoardingCannotSkipQueueHead();
 testCallQueueRemainsFifo();
 testRepeatedFloorCommandsRunInExactClickOrder();

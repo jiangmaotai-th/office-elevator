@@ -176,7 +176,7 @@ export class GameModel {
         return this.passengers
             .filter((passenger) => {
                 return passenger.originFloor === floor
-                    && (passenger.state === PassengerState.Waiting || passenger.state === PassengerState.Boarding);
+                    && passenger.state === PassengerState.Waiting;
             })
             .sort((left, right) => left.id - right.id);
     }
@@ -475,9 +475,7 @@ export class GameModel {
             return 0;
         }
         const boarding: PassengerModel[] = [];
-        const floorQueue = this.getFloorQueue(elevator.currentFloor).filter((passenger) => {
-            return passenger.state === PassengerState.Waiting;
-        });
+        const floorQueue = this.getFloorQueue(elevator.currentFloor);
         for (const passenger of floorQueue) {
             if (boarding.length >= room) {
                 break;
