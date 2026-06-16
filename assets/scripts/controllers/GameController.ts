@@ -2,7 +2,7 @@ import { EventMouse, EventTouch, input, Input } from 'cc';
 import { GameManager } from '../managers/GameManager';
 import { GameView } from '../views/GameView';
 
-const MAX_WAITING_PASSENGERS = 18;
+const MAX_WAITING_PASSENGERS = 48;
 const PASSENGER_APPEAR_INTERVAL = 0.18;
 
 interface PendingPassengerSpawn {
@@ -11,7 +11,6 @@ interface PendingPassengerSpawn {
 }
 
 export class GameController {
-    private spawnTimer = 0;
     private passengerAppearTimer = 0;
     private readonly pendingPassengerSpawns: PendingPassengerSpawn[] = [];
     private activeElevatorIndex = 0;
@@ -45,16 +44,10 @@ export class GameController {
         this.updatePendingPassengerSpawns(deltaTime);
         this.manager.update(deltaTime);
         const model = this.manager.model;
+        this.enqueueTrafficSpawnRequests();
         if (!model.progress.started || model.progress.completed || model.progress.failed) {
             this.view.render(model);
             return;
-        }
-        this.spawnTimer += deltaTime;
-        if (
-            this.spawnTimer >= 3.2
-        ) {
-            this.spawnTimer = 0;
-            this.spawnPassenger();
         }
         this.view.render(model);
     }
@@ -140,7 +133,7 @@ export class GameController {
             this.pointerDragged = true;
         }
         if (this.pointerDragged) {
-            this.view.scrollTowerBy(y - this.pointerLastY, this.manager.model.progress.unlockedFloors);
+            this.view.scrollTowerBy(y - this.pointerLastY, this.manager.model.getRenderableFloors().length);
         }
         this.pointerLastY = y;
     }
@@ -178,7 +171,6 @@ export class GameController {
         if (this.manager.model.progress.failed) {
             if (this.view.isRestartButton(position)) {
                 this.manager.model.restartGame();
-                this.spawnTimer = 0;
                 this.passengerAppearTimer = 0;
                 this.pendingPassengerSpawns.length = 0;
                 this.view.resetTowerScroll();
@@ -191,7 +183,6 @@ export class GameController {
             const upgrade = this.view.upgradeAt(position);
             if (upgrade) {
                 this.manager.model.chooseUpgrade(upgrade);
-                this.spawnTimer = 0;
                 this.passengerAppearTimer = 0;
                 this.pendingPassengerSpawns.length = 0;
                 this.manager.saveNow();
@@ -202,11 +193,9 @@ export class GameController {
         if (!this.manager.model.progress.started) {
             if (this.view.isStartButton(position)) {
                 this.manager.model.startRun();
-                this.spawnTimer = 0;
                 this.passengerAppearTimer = 0;
                 this.pendingPassengerSpawns.length = 0;
-                this.seedPassengers();
-                this.view.setInteractionMessage('运营开始，先选择 S1 或 S2 再点击楼层');
+                this.view.setInteractionMessage('运营开始，观察高峰预警，提前布置 S1/S2');
                 this.manager.saveNow();
             } else if (this.view.isBuildButton(position)) {
                 const built = this.manager.model.extendFloor();
@@ -274,39 +263,28 @@ export class GameController {
         this.view.setInteractionMessage('请点击楼层区域或电梯轿厢');
     }
 
-    private seedPassengers(): void {
-        if (this.manager.model.waitingPassengers.length > 0) {
+    private enqueueTrafficSpawnRequests(): void {
+        const requests = this.manager.model.drainTrafficSpawnRequests();
+        if (requests.length === 0) {
             return;
         }
-        this.createPassengerBatch(0, 4);
-        this.createPassengerBatch(1, 1);
-        this.createPassengerBatch(2, 1);
-    }
-
-    private spawnPassenger(): void {
         const waitingCount = this.manager.model.waitingPassengers.length + this.pendingPassengerSpawns.length;
         if (waitingCount >= MAX_WAITING_PASSENGERS) {
             return;
         }
-        const origin = this.pickPassengerOrigin();
         const room = MAX_WAITING_PASSENGERS - waitingCount;
-        const requestedCount = origin === 0 ? 2 + Math.floor(Math.random() * 3) : 1;
-        this.createPassengerBatch(origin, Math.min(room, requestedCount));
-    }
-
-    private createPassengerBatch(origin: number, count: number): number {
-        const floorCount = this.manager.model.progress.unlockedFloors;
-        let created = 0;
-        for (let index = 0; index < count; index += 1) {
-            let destination = Math.floor(Math.random() * floorCount);
-            while (destination === origin) {
-                destination = Math.floor(Math.random() * floorCount);
-            }
-            this.pendingPassengerSpawns.push({ origin, destination });
-            created += 1;
+        const accepted = requests.slice(0, room);
+        const countsByOrigin = new Map<number, number>();
+        accepted.forEach((request) => {
+            this.pendingPassengerSpawns.push({
+                origin: request.originFloor,
+                destination: request.destinationFloor,
+            });
+            countsByOrigin.set(request.originFloor, (countsByOrigin.get(request.originFloor) ?? 0) + 1);
+        });
+        for (const [origin, count] of countsByOrigin.entries()) {
+            this.view.showQueueIncrease(origin, count);
         }
-        this.view.showQueueIncrease(origin, created);
-        return created;
     }
 
     private updatePendingPassengerSpawns(deltaTime: number): void {
@@ -329,14 +307,4 @@ export class GameController {
         }
     }
 
-    private pickPassengerOrigin(): number {
-        const floorCount = this.manager.model.progress.unlockedFloors;
-        if (floorCount <= 1) {
-            return 0;
-        }
-        if (Math.random() < 0.55) {
-            return 0;
-        }
-        return 1 + Math.floor(Math.random() * (floorCount - 1));
-    }
 }

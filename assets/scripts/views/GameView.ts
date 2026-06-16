@@ -15,6 +15,7 @@ import { GameModel } from '../models/GameModel';
 import {
     ElevatorDirection,
     ElevatorModel,
+    FloorType,
     PassengerDeliveredEvent,
     PassengerModel,
     PassengerState,
@@ -31,20 +32,13 @@ const DANGER = new Color(193, 92, 83, 255);
 const RED = new Color(205, 42, 47, 255);
 const PURPLE = new Color(106, 49, 164, 255);
 const CYAN = new Color(22, 158, 181, 255);
-const DESTINATION_COLORS = [
-    PURPLE,
-    GOLD,
-    GREEN,
-    BLUE,
-    RED,
-    CYAN,
-    new Color(231, 92, 137, 255),
-    new Color(64, 131, 102, 255),
-    new Color(224, 104, 50, 255),
-    new Color(80, 82, 190, 255),
-    new Color(142, 89, 42, 255),
-    new Color(38, 165, 135, 255),
-];
+const FLOOR_TYPE_COLORS: Record<FloorType, Color> = {
+    ground: PURPLE,
+    parking: CYAN,
+    office: BLUE,
+    restaurant: GOLD,
+    rest: GREEN,
+};
 const OFFICE_WALL = new Color(48, 50, 53, 245);
 const OFFICE_WALL_ALT = new Color(57, 59, 62, 245);
 const TOWER_BOTTOM = -425;
@@ -67,7 +61,8 @@ export class GameView implements GameHitAreas {
     readonly root: Node;
     private readonly graphics: Graphics;
     private readonly labels: Record<string, Label> = {};
-    private readonly floorYs: number[] = [];
+    private readonly floorYs = new Map<number, number>();
+    private readonly clickableFloorValues: number[] = [];
     private floorHitHalfHeight = 52;
     private clickableFloors = 0;
     private readonly cabinHitAreas: Array<{ index: number; x: number; y: number; width: number; height: number }> = [];
@@ -151,9 +146,13 @@ export class GameView implements GameHitAreas {
         if (!this.isTowerViewport(position)) {
             return null;
         }
-        for (let floor = 0; floor < Math.min(this.clickableFloors, this.floorYs.length); floor += 1) {
+        for (const floor of this.clickableFloorValues) {
+            const floorY = this.floorYs.get(floor);
+            if (floorY === undefined) {
+                continue;
+            }
             if (
-                Math.abs(position.y - this.floorYs[floor]) <= this.floorHitHalfHeight
+                Math.abs(position.y - floorY) <= this.floorHitHalfHeight
                 && position.x > -340
                 && position.x < 340
             ) {
@@ -303,9 +302,7 @@ export class GameView implements GameHitAreas {
     }
 
     private drawHeader(model: GameModel): void {
-        const minutes = Math.floor(model.progress.elapsedSeconds / 60);
-        const seconds = Math.floor(model.progress.elapsedSeconds % 60);
-        this.labels.time.string = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        this.labels.time.string = this.formatGameTime(model.progress.gameTime);
         this.labels.day.string = `第${model.progress.day}天    等级${model.progress.level}`;
         this.labels.stats.string = `${model.economy.delivered}  已送达    ${model.waitingPassengers.length}  等待中`;
         this.labels.menu.string = '菜单';
@@ -314,6 +311,7 @@ export class GameView implements GameHitAreas {
             : model.economy.multiplier > 1
             ? `${model.economy.multiplier}X  连续高耐心送达`
             : '点击楼层呼叫 S1，到达后点击轿厢让上班族依次进入');
+        this.drawRushWarnings(model);
 
         this.strokeRect(230, 520, 100, 70, INK, 2);
         this.strokeRect(-320, 450, 640, 14, INK, 2);
@@ -323,8 +321,34 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
     }
 
+    private drawRushWarnings(model: GameModel): void {
+        const warnings = model.getUpcomingRushEvents(2);
+        warnings.forEach((warning, index) => {
+            const y = 560 - index * 34;
+            const x = -65;
+            const fromColor = FLOOR_TYPE_COLORS[warning.fromType];
+            const toColor = FLOOR_TYPE_COLORS[warning.toType];
+            this.graphics.fillColor = fromColor;
+            this.graphics.circle(x, y, 8);
+            this.graphics.fill();
+            this.graphics.fillColor = toColor;
+            this.graphics.rect(x + 38, y - 8, 16, 16);
+            this.graphics.fill();
+            this.drawText(
+                `rush-warning-${index}`,
+                `${this.formatRushCountdown(warning.remainingMinutes)}  ${this.floorTypeLabel(warning.fromType)} → ${this.floorTypeLabel(warning.toType)}`,
+                x + 66,
+                y,
+                17,
+                INK,
+                250,
+            );
+        });
+    }
+
     private drawTower(model: GameModel): void {
-        const floorCount = Math.max(MIN_VISIBLE_FLOORS, model.progress.unlockedFloors);
+        const floors = model.getRenderableFloors();
+        const floorCount = Math.max(MIN_VISIBLE_FLOORS, floors.length);
         const floorGap = FLOOR_GAP;
         const bottomY = FLOOR_BASE_Y + this.towerScrollOffset;
         const towerLeft = -340;
@@ -333,17 +357,23 @@ export class GameView implements GameHitAreas {
         const s1Left = 220;
         const shaftWidth = 100;
         this.clickableFloors = model.progress.unlockedFloors;
-        this.floorYs.length = 0;
+        this.floorYs.clear();
+        this.clickableFloorValues.length = 0;
         this.cabinHitAreas.length = 0;
         this.floorHitHalfHeight = floorGap * 0.48;
 
-        for (let floor = 0; floor < floorCount; floor += 1) {
-            const y = bottomY + floor * floorGap;
-            this.floorYs.push(y);
+        for (let index = 0; index < floorCount; index += 1) {
+            const floor = floors[index] ?? (model.minFloor + index);
+            const y = bottomY + index * floorGap;
+            const unlocked = model.isFloorUnlocked(floor);
+            this.floorYs.set(floor, y);
+            if (unlocked) {
+                this.clickableFloorValues.push(floor);
+            }
             if (y + floorGap * 0.5 < TOWER_BOTTOM || y - floorGap * 0.5 > TOWER_TOP) {
                 continue;
             }
-            this.graphics.fillColor = floor % 2 === 0 ? OFFICE_WALL : OFFICE_WALL_ALT;
+            this.graphics.fillColor = index % 2 === 0 ? OFFICE_WALL : OFFICE_WALL_ALT;
             this.graphics.rect(towerLeft, y - floorGap * 0.48, towerRight - towerLeft, floorGap * 0.96);
             this.graphics.fill();
             if (model.warningFloors.includes(floor)) {
@@ -353,9 +383,9 @@ export class GameView implements GameHitAreas {
                 this.graphics.fill();
             }
             this.line(towerLeft, y - floorGap * 0.48, towerRight, y - floorGap * 0.48, new Color(12, 13, 15, 255), 3);
-            this.drawFloorMarker(floor, y, floor < model.progress.unlockedFloors);
-            this.drawOfficeDetails(floor, y, floorGap, floor < model.progress.unlockedFloors);
-            if (floor < model.progress.unlockedFloors) {
+            this.drawFloorMarker(model, floor, y, unlocked);
+            this.drawOfficeDetails(model, floor, y, floorGap, unlocked);
+            if (unlocked) {
                 this.drawPassengers(model, floor, y);
             }
             this.drawEmptyShaft(s2Left, y, floorGap, 'S2');
@@ -364,7 +394,7 @@ export class GameView implements GameHitAreas {
 
         const elevatorXs = [s1Left, s2Left];
         model.elevators.forEach((elevator, index) => {
-            const elevatorY = bottomY + elevator.position * floorGap;
+            const elevatorY = bottomY + (elevator.position - model.minFloor) * floorGap;
             if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
                 this.drawCabin(model, elevator, index, elevatorXs[index], elevatorY, shaftWidth);
             }
@@ -389,9 +419,9 @@ export class GameView implements GameHitAreas {
         this.line(-340, TOWER_TOP, 340, TOWER_TOP, new Color(120, 122, 126, 180), 2);
     }
 
-    private drawFloorMarker(floor: number, y: number, unlocked: boolean): void {
+    private drawFloorMarker(model: GameModel, floor: number, y: number, unlocked: boolean): void {
         const floorLabel = this.formatFloorLabel(floor);
-        const color = this.floorColor(floor);
+        const color = this.floorColor(model, floor);
         this.graphics.fillColor = unlocked ? color : new Color(76, 78, 82, 210);
         this.graphics.rect(-340, y - 55, 76, 110);
         this.graphics.fill();
@@ -399,21 +429,28 @@ export class GameView implements GameHitAreas {
         this.drawDestinationShape(floor, -302, y - 25, 15, unlocked ? PAPER : MUTED);
     }
 
-    private drawOfficeDetails(floor: number, y: number, floorGap: number, unlocked: boolean): void {
+    private drawOfficeDetails(model: GameModel, floor: number, y: number, floorGap: number, unlocked: boolean): void {
         this.graphics.fillColor = new Color(27, 29, 31, 255);
         this.graphics.roundRect(-238, y - 34, 88, 68, 3);
         this.graphics.fill();
         this.strokeRect(-238, y - 34, 88, 68, new Color(96, 99, 103, 255), 2);
         this.line(-209, y - 31, -209, y + 31, new Color(118, 121, 125, 255), 2);
 
-        const companyNames = ['大堂接待', '星火创意', '启明咨询', '智云数据', '未来科技', '国际会议'];
+        const companyNames = ['星火创意', '启明咨询', '智云数据', '未来科技', '国际会议', '云帆金融'];
+        const typeNames: Record<FloorType, string> = {
+            ground: '大堂接待',
+            parking: '地下停车',
+            restaurant: '员工餐厅',
+            rest: '空中休息',
+            office: companyNames[Math.abs(floor) % companyNames.length],
+        };
         this.graphics.fillColor = new Color(30, 31, 33, 255);
         this.graphics.roundRect(-135, y - 28, 150, 56, 3);
         this.graphics.fill();
         this.strokeRect(-135, y - 28, 150, 56, new Color(116, 118, 121, 255), 1);
         this.drawText(
             `company-${floor}`,
-            unlocked ? companyNames[floor % companyNames.length] : '待招商楼层',
+            unlocked ? typeNames[model.getFloorType(floor)] : '待招商楼层',
             -112,
             y + 2,
             17,
@@ -476,7 +513,7 @@ export class GameView implements GameHitAreas {
         waitProgress: number,
         showTimer: boolean,
     ): void {
-        const clothingColor = this.floorColor(passenger.destinationFloor);
+        const clothingColor = this.floorColorByFloor(passenger.destinationFloor);
         const female = passenger.id % 2 === 0;
         this.graphics.fillColor = new Color(238, 199, 165, 255);
         this.graphics.circle(x, y + 13, 9);
@@ -567,7 +604,7 @@ export class GameView implements GameHitAreas {
             if (passenger) {
                 const column = index % 3;
                 const row = Math.floor(index / 3);
-                this.graphics.fillColor = this.floorColor(passenger.destinationFloor);
+                this.graphics.fillColor = this.floorColor(model, passenger.destinationFloor);
                 this.graphics.roundRect(x + 17 + column * 22, y - 7 - row * 23, 14, 18, 3);
                 this.graphics.fill();
                 this.drawText(
@@ -592,7 +629,7 @@ export class GameView implements GameHitAreas {
             }
             return;
         }
-        const floorY = this.floorYs[feedback.floor];
+        const floorY = this.floorYs.get(feedback.floor);
         const passenger = model.getPassenger(feedback.passengerId);
         if (
             floorY === undefined
@@ -619,6 +656,24 @@ export class GameView implements GameHitAreas {
             PAPER,
             68,
         );
+        if (feedback.multiplier > 1) {
+            const elevatorIndex = feedback.elevatorIndex ?? 0;
+            const badgeX = elevatorIndex === 0 ? 235 : 120;
+            this.graphics.fillColor = new Color(22, 23, 25, 230);
+            this.graphics.roundRect(badgeX, floorY + 78, 58, 32, 6);
+            this.graphics.fill();
+            this.drawText(
+                'deliveryMultiplier',
+                `${feedback.multiplier}X`,
+                badgeX + 11,
+                floorY + 94,
+                19,
+                GOLD,
+                38,
+            );
+        } else if (this.labels.deliveryMultiplier) {
+            this.labels.deliveryMultiplier.node.active = false;
+        }
     }
 
     private drawBuildButton(model: GameModel): void {
@@ -666,7 +721,7 @@ export class GameView implements GameHitAreas {
                 this.queueIncreaseFeedbacks.splice(index, 1);
                 continue;
             }
-            const floorY = this.floorYs[feedback.floor];
+            const floorY = this.floorYs.get(feedback.floor);
             if (floorY === undefined || floorY < TOWER_BOTTOM || floorY > TOWER_TOP) {
                 continue;
             }
@@ -766,24 +821,79 @@ export class GameView implements GameHitAreas {
                 || key.startsWith('cabin-target-')
                 || key.startsWith('cabin-passenger-')
                 || key.startsWith('queue-increase-')
+                || key.startsWith('rush-warning-')
                 || key.startsWith('start-')
                 || key === 'deliveryCount'
+                || key === 'deliveryMultiplier'
             ) {
                 label.node.active = false;
             }
         });
     }
 
-    private floorColor(floor: number): Color {
-        return DESTINATION_COLORS[floor % DESTINATION_COLORS.length];
+    private floorColor(model: GameModel, floor: number): Color {
+        return FLOOR_TYPE_COLORS[model.getFloorType(floor)];
+    }
+
+    private floorColorByFloor(floor: number): Color {
+        if (floor < 0) {
+            return FLOOR_TYPE_COLORS.parking;
+        }
+        if (floor === 0) {
+            return FLOOR_TYPE_COLORS.ground;
+        }
+        if (floor === 1) {
+            return FLOOR_TYPE_COLORS.restaurant;
+        }
+        if (floor === 2) {
+            return FLOOR_TYPE_COLORS.rest;
+        }
+        return FLOOR_TYPE_COLORS.office;
     }
 
     private formatFloorLabel(floor: number): string {
+        if (floor < 0) {
+            return `B${Math.abs(floor)}`;
+        }
         return floor === 0 ? 'G' : String(floor).padStart(2, '0');
     }
 
+    private formatGameTime(gameMinutes: number): string {
+        const normalized = Math.max(0, Math.floor(gameMinutes));
+        const hours = Math.floor(normalized / 60) % 24;
+        const minutes = normalized % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
+
+    private formatRushCountdown(remainingMinutes: number): string {
+        const minutes = Math.ceil(Math.max(0, remainingMinutes));
+        if (minutes <= 10) {
+            return '即将到来';
+        }
+        const hours = Math.floor(minutes / 60);
+        const rest = minutes % 60;
+        if (hours <= 0) {
+            return `${minutes}分钟后`;
+        }
+        if (rest === 0) {
+            return `${hours}小时后`;
+        }
+        return `${hours}小时${rest}分后`;
+    }
+
+    private floorTypeLabel(type: FloorType): string {
+        const labels: Record<FloorType, string> = {
+            ground: 'G层',
+            parking: '停车场',
+            office: '办公层',
+            restaurant: '餐厅层',
+            rest: '休息层',
+        };
+        return labels[type];
+    }
+
     private drawDestinationShape(floor: number, x: number, y: number, radius: number, color?: Color): void {
-        this.graphics.fillColor = color ?? this.floorColor(floor);
+        this.graphics.fillColor = color ?? this.floorColorByFloor(floor);
         const shape = floor % 6;
         if (shape === 0) {
             this.graphics.moveTo(x, y + radius);

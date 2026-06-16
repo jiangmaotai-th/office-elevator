@@ -1,4 +1,4 @@
-import { GameModel } from '../assets/scripts/models/GameModel';
+import { GameModel, START_TIME, TIME_SCALE } from '../assets/scripts/models/GameModel';
 import { ElevatorDirection, PassengerState } from '../assets/scripts/models/GameTypes';
 
 function assert(condition: boolean, message: string): void {
@@ -96,20 +96,20 @@ function testPassengerWaitTimingMatchesFortySecondRule(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
 
-    assert(passenger.maxPatience === 40, 'base passenger wait time should be 40 seconds');
-    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should stay hidden before 20 seconds');
-    assert(model.warningFloors.length === 0, 'warning should stay silent before 30 seconds');
+    assert(passenger.maxPatience === 40, 'base passenger wait time should be 40 game minutes');
+    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should stay hidden before 20 game minutes');
+    assert(model.warningFloors.length === 0, 'warning should stay silent before 30 game minutes');
 
-    model.update(19.9);
-    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should still be hidden just before 20 seconds');
-    model.update(0.2);
-    assert(model.shouldShowPassengerTimer(passenger), 'timer ring should appear at 20 seconds');
-    assert(model.warningFloors.length === 0, 'warning should not start at 20 seconds');
+    model.update(19.9 / TIME_SCALE);
+    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should still be hidden just before 20 game minutes');
+    model.update(0.2 / TIME_SCALE);
+    assert(model.shouldShowPassengerTimer(passenger), 'timer ring should appear at 20 game minutes');
+    assert(model.warningFloors.length === 0, 'warning should not start at 20 game minutes');
 
-    model.update(9.9);
-    assert(model.warningFloors.includes(0), 'warning should start at 30 seconds');
-    model.update(10);
-    assert(model.progress.failed, 'the run should fail when the passenger reaches 40 seconds');
+    model.update(9.9 / TIME_SCALE);
+    assert(model.warningFloors.includes(0), 'warning should start at 30 game minutes');
+    model.update(10 / TIME_SCALE);
+    assert(model.progress.failed, 'the run should fail when the passenger reaches 40 game minutes');
 }
 
 function testAutomaticBoardingMatchesArrivalDirection(): void {
@@ -165,18 +165,19 @@ function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
     );
 }
 
-function testBoardingPassengerCannotTimeout(): void {
+function testBoardingPassengerLosesPatienceAtHalfSpeed(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
-    passenger.maxPatience = 1;
-    passenger.waitElapsed = 0.99;
-    passenger.patience = 0.01;
+    passenger.maxPatience = 10;
+    passenger.waitElapsed = 0;
+    passenger.patience = 10;
 
     assert(model.boardAtCurrentFloor() === 1, 'the passenger should start boarding');
     assert(model.getFloorQueue(0).length === 0, 'boarding passengers should not remain in the waiting queue');
-    model.update(0.5);
+    model.update(1);
 
-    assert(!model.progress.failed, 'a passenger already boarding must not fail the run');
+    assert(!model.progress.failed, 'half-speed patience loss should not fail immediately');
+    assert(passenger.waitElapsed === 5, 'boarding or riding passengers should lose patience at 50% speed');
     assert(passenger.state === PassengerState.Riding, 'the passenger should finish boarding into the elevator');
     assert(model.warningFloors.length === 0, 'boarding or riding passengers should not emit waiting warnings');
 }
@@ -325,20 +326,20 @@ function testPassengersLeaveOneAtATimeWithSeparateEvents(): void {
 function testPatienceWarningAndFailureRule(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
-    passenger.maxPatience = 4;
-    passenger.waitElapsed = 2.9;
-    passenger.patience = 1.1;
+    passenger.maxPatience = 40;
+    passenger.waitElapsed = 29;
+    passenger.patience = 11;
 
-    model.update(0.15);
+    model.update(1.1 / TIME_SCALE);
     assert(model.warningFloors.includes(0), 'the passenger floor should warn during the final quarter');
-    model.update(0.65);
+    model.update(0.8);
     const warningEvents = model.drainWarningEvents();
     assert(warningEvents.length === 1, 'a warning floor should emit one rhythmic warning event');
     assert(warningEvents[0].floor === 0, 'the warning event should identify the passenger floor');
 
     model.queueFloor(2);
     const positionBeforeFailure = model.elevator.position;
-    model.update(0.31);
+    model.update(1);
     assert(model.progress.failed, 'one timed-out passenger should fail the current game');
     assert(passenger.state === PassengerState.Lost, 'the timed-out passenger should leave the queue');
     model.update(1);
@@ -442,11 +443,44 @@ function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
     model.queueFloor(1);
     runUntilIdle(model);
     model.update(0.29);
+    const deliveredEvents = model.drainDeliveredEvents();
 
     assert(model.economy.delivered === 1, 'delivery should count toward the run');
-    assert(model.economy.score === 15, 'high-patience delivery should score base points with the speed bonus');
-    assert(model.economy.bestScore === 15, 'best score should track the highest run score');
-    assert(model.economy.multiplierProgress === 2, 'high-patience delivery should fill multiplier progress faster');
+    assert(model.economy.score === 30, 'high-patience delivery should score with a 3X multiplier');
+    assert(model.economy.bestScore === 30, 'best score should track the highest run score');
+    assert(model.economy.multiplier === 3, 'high-patience delivery should set the current multiplier to 3X');
+    assert(deliveredEvents[0].multiplier === 3, 'delivery event should expose the floating badge multiplier');
+}
+
+function testFloorTypesAndRushWarnings(): void {
+    const model = new GameModel();
+
+    assert(model.getFloorType(-2) === 'parking', 'B2 should be a parking floor');
+    assert(model.getFloorType(-1) === 'parking', 'B1 should be a parking floor');
+    assert(model.getFloorType(0) === 'ground', 'G should be the ground lobby');
+    assert(model.getFloorType(1) === 'restaurant', 'floor 1 should be the restaurant');
+    assert(model.getFloorType(2) === 'rest', 'floor 2 should be the rest floor');
+    assert(model.getFloorType(10) === 'office', 'upper floors should default to office');
+    assert(model.progress.gameTime === START_TIME, 'the game clock should start at 07:00');
+
+    const warnings = model.getUpcomingRushEvents(2);
+    assert(warnings.length === 2, '07:00 should warn about the first two morning rush events');
+    assert(warnings[0].fromType === 'ground' && warnings[0].toType === 'office', 'first warning should be lobby to office');
+    assert(warnings[1].fromType === 'parking' && warnings[1].toType === 'office', 'second warning should be parking to office');
+}
+
+function testRushEventGeneratesTypedPassengerRequests(): void {
+    const model = createRunningModel();
+
+    model.update(60 / TIME_SCALE);
+    const requests = model.drainTrafficSpawnRequests();
+    const morningRequests = requests.filter((request) => request.originFloor === 0);
+
+    assert(morningRequests.length === 12, '08:00 rush should create twelve lobby passengers');
+    assert(
+        morningRequests.every((request) => model.getFloorType(request.destinationFloor) === 'office'),
+        'lobby rush passengers should all target office floors',
+    );
 }
 
 testRunWaitsForExplicitStart();
@@ -455,7 +489,7 @@ testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
 testPassengerWaitTimingMatchesFortySecondRule();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
-testBoardingPassengerCannotTimeout();
+testBoardingPassengerLosesPatienceAtHalfSpeed();
 testAutomaticBoardingCannotSkipQueueHead();
 testCallQueueRemainsFifo();
 testRepeatedFloorCommandsRunInExactClickOrder();
@@ -470,4 +504,6 @@ testSecondElevatorTakesOverflowWhenBothCabinsShareFloor();
 testFloorCommandsStayOnExplicitElevator();
 testExplicitElevatorQueueSurvivesControlSwitch();
 testDeliveryAddsRunScoreAndMultiplierProgress();
+testFloorTypesAndRushWarnings();
+testRushEventGeneratesTypedPassengerRequests();
 console.log('MODEL_DIRECTION_RULES_OK');

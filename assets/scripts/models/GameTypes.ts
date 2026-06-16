@@ -32,6 +32,7 @@ export interface PassengerBoardedEvent {
 export interface PassengerDeliveredEvent {
     passengerId: number;
     floor: number;
+    multiplier: number;
     stopDeliveredCount: number;
     totalDelivered: number;
     elevatorIndex?: number;
@@ -70,9 +71,31 @@ export interface ProgressModel {
     targetDeliveries: number;
     unlockedFloors: number;
     elapsedSeconds: number;
+    gameTime: number;
     started: boolean;
     completed: boolean;
     failed: boolean;
+}
+
+export type FloorType = 'ground' | 'parking' | 'office' | 'restaurant' | 'rest';
+
+export interface RushEventModel {
+    time: number;
+    warningLeadTime: number;
+    fromType: FloorType;
+    toType: FloorType;
+    amount: number;
+    label: string;
+    triggered: boolean;
+}
+
+export interface RushWarningModel extends RushEventModel {
+    remainingMinutes: number;
+}
+
+export interface TrafficSpawnRequest {
+    originFloor: number;
+    destinationFloor: number;
 }
 
 export enum UpgradeType {

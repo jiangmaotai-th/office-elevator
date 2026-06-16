@@ -2,6 +2,7 @@ import {
     EconomyModel,
     ElevatorDirection,
     ElevatorModel,
+    FloorType,
     GameSnapshot,
     PassengerModel,
     PassengerBoardedEvent,
@@ -9,19 +10,27 @@ import {
     PassengerState,
     PassengerWarningEvent,
     ProgressModel,
+    RushEventModel,
+    RushWarningModel,
+    TrafficSpawnRequest,
     UpgradeModel,
     UpgradeType,
 } from './GameTypes';
 
-const MIN_FLOORS = 3;
+export const START_TIME = 7 * 60;
+export const TIME_SCALE = 10;
+const MIN_FLOOR = -2;
+const INITIAL_UNLOCKED_FLOORS = 11;
+const DEFAULT_MAX_FLOOR = 10;
 const BOARDING_INTERVAL = 0.22;
 const UNLOADING_INTERVAL = 0.28;
-const PASSENGER_WAIT_SECONDS = 40;
+const PASSENGER_WAIT_MINUTES = 40;
 const PATIENCE_RING_RATIO = 0.5;
 const PATIENCE_WARNING_RATIO = 0.75;
 const WARNING_SOUND_INTERVAL = 0.8;
 const ELEVATOR_COUNT = 2;
 const DELIVERY_SCORE_BASE = 10;
+const LOW_TRAFFIC_INTERVAL_MINUTES = 25;
 
 export class GameModel {
     readonly passengers: PassengerModel[] = [];
@@ -67,8 +76,9 @@ export class GameModel {
         day: 1,
         level: 1,
         targetDeliveries: 12,
-        unlockedFloors: MIN_FLOORS,
+        unlockedFloors: INITIAL_UNLOCKED_FLOORS,
         elapsedSeconds: 0,
+        gameTime: START_TIME,
         started: false,
         completed: false,
         failed: false,
@@ -93,6 +103,89 @@ export class GameModel {
         () => null,
     );
     private readonly stopDeliveredCounts: number[] = Array.from({ length: ELEVATOR_COUNT }, () => 0);
+    private readonly trafficSpawnRequests: TrafficSpawnRequest[] = [];
+    private lowTrafficTimer = 0;
+    private readonly floorTypeOverrides = new Map<number, FloorType>([
+        [-2, 'parking'],
+        [-1, 'parking'],
+        [0, 'ground'],
+        [1, 'restaurant'],
+        [2, 'rest'],
+    ]);
+    readonly rushEvents: RushEventModel[] = [
+        {
+            time: 8 * 60,
+            warningLeadTime: 180,
+            fromType: 'ground',
+            toType: 'office',
+            amount: 12,
+            label: '上班高峰：大厅去办公层',
+            triggered: false,
+        },
+        {
+            time: 8 * 60 + 20,
+            warningLeadTime: 180,
+            fromType: 'parking',
+            toType: 'office',
+            amount: 10,
+            label: '上班高峰：停车场去办公层',
+            triggered: false,
+        },
+        {
+            time: 11 * 60 + 50,
+            warningLeadTime: 120,
+            fromType: 'office',
+            toType: 'restaurant',
+            amount: 14,
+            label: '午餐高峰：办公层去餐厅',
+            triggered: false,
+        },
+        {
+            time: 12 * 60 + 40,
+            warningLeadTime: 120,
+            fromType: 'restaurant',
+            toType: 'office',
+            amount: 14,
+            label: '午餐返回：餐厅回办公层',
+            triggered: false,
+        },
+        {
+            time: 15 * 60,
+            warningLeadTime: 120,
+            fromType: 'office',
+            toType: 'rest',
+            amount: 6,
+            label: '下午休息：办公层去休息层',
+            triggered: false,
+        },
+        {
+            time: 15 * 60 + 40,
+            warningLeadTime: 120,
+            fromType: 'rest',
+            toType: 'office',
+            amount: 6,
+            label: '休息返回：休息层回办公层',
+            triggered: false,
+        },
+        {
+            time: 17 * 60 + 30,
+            warningLeadTime: 180,
+            fromType: 'office',
+            toType: 'ground',
+            amount: 12,
+            label: '下班高峰：办公层去大厅',
+            triggered: false,
+        },
+        {
+            time: 17 * 60 + 45,
+            warningLeadTime: 180,
+            fromType: 'office',
+            toType: 'parking',
+            amount: 12,
+            label: '下班高峰：办公层去停车场',
+            triggered: false,
+        },
+    ];
 
     restore(snapshot: GameSnapshot | null): void {
         if (!snapshot || snapshot.version !== 1) {
@@ -104,6 +197,8 @@ export class GameModel {
         this.economy.score ??= 0;
         this.economy.bestScore ??= this.economy.score;
         this.progress.started ??= false;
+        this.progress.gameTime ??= START_TIME;
+        this.progress.unlockedFloors = Math.max(this.progress.unlockedFloors, INITIAL_UNLOCKED_FLOORS);
         this.applyUpgradeEffects();
         this.progress.completed = false;
         this.progress.failed = false;
@@ -119,7 +214,7 @@ export class GameModel {
     }
 
     createPassenger(originFloor: number, destinationFloor: number): PassengerModel {
-        const maxPatience = PASSENGER_WAIT_SECONDS + this.upgrades.patienceLevel * 4;
+        const maxPatience = PASSENGER_WAIT_MINUTES + this.upgrades.patienceLevel * 4;
         const passenger: PassengerModel = {
             id: this.nextPassengerId++,
             originFloor,
@@ -236,13 +331,59 @@ export class GameModel {
         return this.warningEvents.splice(0);
     }
 
+    drainTrafficSpawnRequests(): TrafficSpawnRequest[] {
+        return this.trafficSpawnRequests.splice(0);
+    }
+
+    get minFloor(): number {
+        return MIN_FLOOR;
+    }
+
+    get maxUnlockedFloor(): number {
+        return this.progress.unlockedFloors - 1;
+    }
+
+    getRenderableFloors(): number[] {
+        const maxFloor = Math.max(DEFAULT_MAX_FLOOR, this.maxUnlockedFloor);
+        const floors: number[] = [];
+        for (let floor = MIN_FLOOR; floor <= maxFloor; floor += 1) {
+            floors.push(floor);
+        }
+        return floors;
+    }
+
+    isFloorUnlocked(floor: number): boolean {
+        return floor >= MIN_FLOOR && floor <= this.maxUnlockedFloor;
+    }
+
+    getFloorType(floor: number): FloorType {
+        return this.floorTypeOverrides.get(floor) ?? 'office';
+    }
+
+    getFloorsByType(type: FloorType): number[] {
+        return this.getRenderableFloors()
+            .filter((floor) => this.isFloorUnlocked(floor) && this.getFloorType(floor) === type);
+    }
+
+    getUpcomingRushEvents(limit = 2): RushWarningModel[] {
+        return this.rushEvents
+            .filter((event) => !event.triggered)
+            .map((event) => ({
+                ...event,
+                remainingMinutes: event.time - this.progress.gameTime,
+            }))
+            .filter((event) => event.remainingMinutes >= 0 && event.remainingMinutes <= event.warningLeadTime)
+            .sort((left, right) => left.remainingMinutes - right.remainingMinutes)
+            .slice(0, limit);
+    }
+
     queueFloor(floor: number): boolean {
         return this.queueFloorForElevator(floor, 0);
     }
 
     queueFloorForElevator(floor: number, elevatorIndex: number): boolean {
         const elevator = this.elevators[elevatorIndex];
-        if (floor < 0 || floor >= this.progress.unlockedFloors) {
+        if (!this.isFloorUnlocked(floor)) {
             return false;
         }
         if (!elevator) {
@@ -292,7 +433,13 @@ export class GameModel {
             return;
         }
         this.progress.elapsedSeconds += deltaTime;
-        this.updatePatience(deltaTime);
+        const gameMinutes = deltaTime * TIME_SCALE;
+        this.progress.gameTime += gameMinutes;
+        this.updateTraffic(gameMinutes);
+        this.updatePatience(gameMinutes, PassengerState.Waiting, 1);
+        this.updatePatience(gameMinutes, PassengerState.Boarding, 0.5);
+        this.updatePatience(gameMinutes, PassengerState.Riding, 0.5);
+        this.updatePatience(gameMinutes, PassengerState.Exiting, 0.5);
         if (this.progress.failed) {
             return;
         }
@@ -317,7 +464,7 @@ export class GameModel {
     }
 
     get floorExtensionCost(): number {
-        return 10 + (this.progress.unlockedFloors - MIN_FLOORS) * 10;
+        return 10 + (this.progress.unlockedFloors - INITIAL_UNLOCKED_FLOORS) * 10;
     }
 
     chooseUpgrade(type: UpgradeType): void {
@@ -347,15 +494,17 @@ export class GameModel {
         this.economy.multiplier = 1;
         this.economy.multiplierProgress = 0;
         this.progress.elapsedSeconds = 0;
+        this.progress.gameTime = START_TIME;
         this.progress.started = false;
         this.progress.completed = false;
         this.progress.failed = false;
+        this.resetTraffic();
         this.applyUpgradeEffects();
     }
 
-    private updatePatience(deltaTime: number): void {
-        for (const passenger of this.waitingPassengers) {
-            passenger.waitElapsed += deltaTime;
+    private updatePatience(gameMinutes: number, state: PassengerState, rate: number): void {
+        for (const passenger of this.passengers.filter((candidate) => candidate.state === state)) {
+            passenger.waitElapsed += gameMinutes * rate;
             passenger.patience = Math.max(0, passenger.maxPatience - passenger.waitElapsed);
             if (passenger.waitElapsed < passenger.maxPatience) {
                 continue;
@@ -367,6 +516,53 @@ export class GameModel {
             this.economy.multiplierProgress = 0;
             this.progress.failed = true;
             return;
+        }
+    }
+
+    private updateTraffic(gameMinutes: number): void {
+        this.rushEvents.forEach((event) => {
+            if (event.triggered || this.progress.gameTime < event.time) {
+                return;
+            }
+            this.enqueueTrafficPassengers(event.fromType, event.toType, event.amount);
+            event.triggered = true;
+        });
+
+        this.lowTrafficTimer += gameMinutes;
+        if (this.lowTrafficTimer < LOW_TRAFFIC_INTERVAL_MINUTES) {
+            return;
+        }
+        this.lowTrafficTimer %= LOW_TRAFFIC_INTERVAL_MINUTES;
+        const routes: Array<[FloorType, FloorType]> = [
+            ['ground', 'office'],
+            ['parking', 'office'],
+            ['office', 'ground'],
+            ['office', 'parking'],
+            ['office', 'restaurant'],
+            ['office', 'rest'],
+        ];
+        const route = routes[Math.floor(Math.random() * routes.length)];
+        this.enqueueTrafficPassengers(route[0], route[1], 1 + Math.floor(Math.random() * 2));
+    }
+
+    private enqueueTrafficPassengers(fromType: FloorType, toType: FloorType, amount: number): void {
+        const fromFloors = this.getFloorsByType(fromType);
+        const toFloors = this.getFloorsByType(toType);
+        if (fromFloors.length === 0 || toFloors.length === 0) {
+            return;
+        }
+        for (let index = 0; index < amount; index += 1) {
+            const originFloor = fromFloors.length === 1
+                ? fromFloors[0]
+                : fromFloors[index % fromFloors.length];
+            let destinationFloor = toFloors[Math.floor(Math.random() * toFloors.length)];
+            if (destinationFloor === originFloor && toFloors.length > 1) {
+                destinationFloor = toFloors[(toFloors.indexOf(destinationFloor) + 1) % toFloors.length];
+            }
+            if (destinationFloor === originFloor) {
+                continue;
+            }
+            this.trafficSpawnRequests.push({ originFloor, destinationFloor });
         }
     }
 
@@ -475,27 +671,29 @@ export class GameModel {
             const elevator = this.elevators[elevatorIndex];
             elevator.passengers = elevator.passengers.filter((id) => id !== passenger.id);
             const patienceRatio = passenger.patience / passenger.maxPatience;
-            this.economy.multiplierProgress += patienceRatio >= 0.6 ? 2 : 1;
+            const deliveryMultiplier = patienceRatio >= 0.8
+                ? 3
+                : patienceRatio >= 0.5
+                    ? 2
+                    : 1;
+            this.economy.multiplier = deliveryMultiplier;
+            this.economy.multiplierProgress = 0;
             this.economy.delivered += 1;
-            this.economy.coins += this.economy.multiplier;
-            const quickDeliveryBonus = patienceRatio >= 0.6 ? 1.5 : 1;
-            const scoreGain = Math.round(DELIVERY_SCORE_BASE * this.economy.multiplier * quickDeliveryBonus);
+            this.economy.coins += deliveryMultiplier;
+            const scoreGain = DELIVERY_SCORE_BASE * deliveryMultiplier;
             this.economy.score += scoreGain;
             this.economy.bestScore = Math.max(this.economy.bestScore, this.economy.score);
             this.stopDeliveredCounts[elevatorIndex] += 1;
             this.deliveredEvents.push({
                 passengerId: passenger.id,
                 floor: elevator.currentFloor,
+                multiplier: deliveryMultiplier,
                 stopDeliveredCount: this.stopDeliveredCounts[elevatorIndex],
                 totalDelivered: this.economy.delivered,
                 elevatorIndex,
             });
         }
 
-        if (this.economy.multiplierProgress >= 8) {
-            this.economy.multiplier = Math.min(3, this.economy.multiplier + 1);
-            this.economy.multiplierProgress = 0;
-        }
         if (unloadingQueue.length === 0 && this.pendingArrivalDirections[elevatorIndex] !== null) {
             const arrivalDirection = this.pendingArrivalDirections[elevatorIndex];
             this.pendingArrivalDirections[elevatorIndex] = null;
@@ -554,7 +752,7 @@ export class GameModel {
         const elevator = this.elevators[elevatorIndex];
         let added = false;
         floors.forEach((floor) => {
-            if (floor < 0 || floor >= this.progress.unlockedFloors) {
+            if (!this.isFloorUnlocked(floor)) {
                 return;
             }
             elevator.queue.push(floor);
@@ -599,6 +797,7 @@ export class GameModel {
         this.progress.level += 1;
         this.progress.targetDeliveries += 6;
         this.progress.elapsedSeconds = 0;
+        this.progress.gameTime = START_TIME;
         this.progress.started = false;
         this.progress.completed = false;
         this.progress.failed = false;
@@ -607,6 +806,15 @@ export class GameModel {
         this.economy.score = 0;
         this.economy.multiplier = 1;
         this.economy.multiplierProgress = 0;
+        this.resetTraffic();
+    }
+
+    private resetTraffic(): void {
+        this.rushEvents.forEach((event) => {
+            event.triggered = false;
+        });
+        this.trafficSpawnRequests.length = 0;
+        this.lowTrafficTimer = 0;
     }
 
     private resetElevatorAndQueues(): void {
