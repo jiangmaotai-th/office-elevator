@@ -37,7 +37,7 @@ const TOWER_BOTTOM = -425;
 const TOWER_TOP = 355;
 const FLOOR_GAP = 180;
 const FLOOR_BASE_Y = -285;
-const MIN_VISIBLE_FLOORS = 12;
+const MIN_VISIBLE_FLOORS = 30;
 
 export interface GameHitAreas {
     floorAt(position: Vec3): number | null;

@@ -127,7 +127,7 @@ export class GameController {
             this.pointerDragged = true;
         }
         if (this.pointerDragged) {
-            this.view.scrollTowerBy(this.pointerLastY - y, this.manager.model.progress.unlockedFloors);
+            this.view.scrollTowerBy(y - this.pointerLastY, this.manager.model.progress.unlockedFloors);
         }
         this.pointerLastY = y;
     }
