@@ -483,7 +483,7 @@ function testRushEventGeneratesTypedPassengerRequests(): void {
     const requests = model.drainTrafficSpawnRequests();
     const morningRequests = requests.filter((request) => request.originFloor === 0);
 
-    assert(morningRequests.length === 12, '08:00 rush should create twelve lobby passengers');
+    assert(morningRequests.length === 6, '08:00 rush should create a controlled lobby passenger wave');
     assert(
         morningRequests.every((request) => model.getFloorType(request.destinationFloor) === 'office'),
         'lobby rush passengers should all target office floors',

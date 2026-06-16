@@ -39,6 +39,24 @@ const FLOOR_TYPE_COLORS: Record<FloorType, Color> = {
     restaurant: GOLD,
     rest: GREEN,
 };
+const FLOOR_COLORS = [
+    new Color(24, 154, 181, 255),
+    new Color(75, 124, 214, 255),
+    new Color(106, 49, 164, 255),
+    new Color(240, 151, 0, 255),
+    new Color(123, 181, 14, 255),
+    new Color(27, 105, 198, 255),
+    new Color(205, 42, 47, 255),
+    new Color(231, 92, 137, 255),
+    new Color(64, 131, 102, 255),
+    new Color(224, 104, 50, 255),
+    new Color(80, 82, 190, 255),
+    new Color(142, 89, 42, 255),
+    new Color(38, 165, 135, 255),
+    new Color(84, 128, 63, 255),
+    new Color(177, 74, 54, 255),
+    new Color(58, 142, 196, 255),
+];
 const OFFICE_WALL = new Color(48, 50, 53, 245);
 const OFFICE_WALL_ALT = new Color(57, 59, 62, 245);
 const TOWER_BOTTOM = -425;
@@ -426,7 +444,6 @@ export class GameView implements GameHitAreas {
         this.graphics.rect(-340, y - 55, 76, 110);
         this.graphics.fill();
         this.drawText(`floor-${floor}`, floorLabel, -326, y + 23, 32, unlocked ? PAPER : MUTED, 64);
-        this.drawDestinationShape(floor, -302, y - 25, 15, unlocked ? PAPER : MUTED);
     }
 
     private drawOfficeDetails(model: GameModel, floor: number, y: number, floorGap: number, unlocked: boolean): void {
@@ -524,15 +541,6 @@ export class GameView implements GameHitAreas {
         this.graphics.fillColor = clothingColor;
         this.graphics.roundRect(x - 10, y - 10, 20, 20, 4);
         this.graphics.fill();
-        this.drawText(
-            `passenger-destination-${passenger.id}`,
-            this.formatFloorLabel(passenger.destinationFloor),
-            x - 11,
-            y - 4,
-            10,
-            PAPER,
-            24,
-        );
         this.graphics.fillColor = INK;
         if (female) {
             this.graphics.moveTo(x - 10, y - 8);
@@ -609,15 +617,6 @@ export class GameView implements GameHitAreas {
                 this.graphics.fillColor = this.floorColor(model, passenger.destinationFloor);
                 this.graphics.roundRect(iconX, iconY, 14, 18, 3);
                 this.graphics.fill();
-                this.drawText(
-                    `cabin-passenger-${id}`,
-                    this.formatFloorLabel(passenger.destinationFloor),
-                    iconX + 1,
-                    iconY + 9,
-                    8,
-                    PAPER,
-                    16,
-                );
                 if (model.shouldShowPassengerTimer(passenger)) {
                     const waitProgress = model.getPassengerWaitProgress(passenger);
                     this.graphics.strokeColor = waitProgress >= 0.75 ? DANGER : new Color(225, 220, 211, 180);
@@ -848,23 +847,13 @@ export class GameView implements GameHitAreas {
     }
 
     private floorColor(model: GameModel, floor: number): Color {
-        return FLOOR_TYPE_COLORS[model.getFloorType(floor)];
+        const index = model.getRenderableFloors().indexOf(floor);
+        return FLOOR_COLORS[Math.max(0, index) % FLOOR_COLORS.length];
     }
 
     private floorColorByFloor(floor: number): Color {
-        if (floor < 0) {
-            return FLOOR_TYPE_COLORS.parking;
-        }
-        if (floor === 0) {
-            return FLOOR_TYPE_COLORS.ground;
-        }
-        if (floor === 1) {
-            return FLOOR_TYPE_COLORS.restaurant;
-        }
-        if (floor === 2) {
-            return FLOOR_TYPE_COLORS.rest;
-        }
-        return FLOOR_TYPE_COLORS.office;
+        const index = floor + 2;
+        return FLOOR_COLORS[Math.max(0, index) % FLOOR_COLORS.length];
     }
 
     private formatFloorLabel(floor: number): string {
@@ -906,37 +895,6 @@ export class GameView implements GameHitAreas {
             rest: '休息层',
         };
         return labels[type];
-    }
-
-    private drawDestinationShape(floor: number, x: number, y: number, radius: number, color?: Color): void {
-        this.graphics.fillColor = color ?? this.floorColorByFloor(floor);
-        const shape = floor % 6;
-        if (shape === 0) {
-            this.graphics.moveTo(x, y + radius);
-            this.graphics.lineTo(x - radius, y - radius);
-            this.graphics.lineTo(x + radius, y - radius);
-            this.graphics.close();
-        } else if (shape === 1) {
-            this.graphics.moveTo(x, y + radius);
-            this.graphics.lineTo(x - radius, y);
-            this.graphics.lineTo(x, y - radius);
-            this.graphics.lineTo(x + radius, y);
-            this.graphics.close();
-        } else if (shape === 2) {
-            this.graphics.rect(x - radius, y - radius, radius * 2, radius * 2);
-        } else if (shape === 3) {
-            this.graphics.circle(x, y, radius);
-        } else if (shape === 4) {
-            this.graphics.roundRect(x - radius, y - radius, radius * 2, radius * 2, radius * 0.45);
-        } else {
-            this.graphics.moveTo(x, y + radius);
-            this.graphics.lineTo(x - radius, y + radius * 0.3);
-            this.graphics.lineTo(x - radius * 0.65, y - radius);
-            this.graphics.lineTo(x + radius * 0.65, y - radius);
-            this.graphics.lineTo(x + radius, y + radius * 0.3);
-            this.graphics.close();
-        }
-        this.graphics.fill();
     }
 
     private drawText(
