@@ -25,6 +25,7 @@ export interface PassengerModel {
 export interface PassengerBoardedEvent {
     passengerId: number;
     destinationFloor: number;
+    elevatorIndex?: number;
 }
 
 export interface PassengerDeliveredEvent {
@@ -32,6 +33,7 @@ export interface PassengerDeliveredEvent {
     floor: number;
     stopDeliveredCount: number;
     totalDelivered: number;
+    elevatorIndex?: number;
 }
 
 export interface PassengerWarningEvent {
@@ -39,6 +41,7 @@ export interface PassengerWarningEvent {
 }
 
 export interface ElevatorModel {
+    id: string;
     currentFloor: number;
     targetFloor: number | null;
     position: number;

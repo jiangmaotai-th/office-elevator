@@ -191,18 +191,20 @@ export class GameController {
         if (this.view.isMenuOpen) {
             return;
         }
-        if (this.view.isCabin(position)) {
+        const cabinIndex = this.view.cabinAt(position);
+        if (cabinIndex !== null) {
             const model = this.manager.model;
-            const boarded = model.boardAtCurrentFloor();
+            const elevator = model.elevators[cabinIndex];
+            const boarded = model.boardAtElevator(cabinIndex);
             const message = boarded > 0
-                ? `${boarded} 名乘客正在依次上车`
-                : model.isElevatorMoving
-                    ? `S1 正在前往 ${model.elevator.targetFloor} 层`
+                ? `${elevator.id}：${boarded} 名乘客正在依次上车`
+                : elevator.targetFloor !== null
+                    ? `${elevator.id} 正在前往 ${elevator.targetFloor} 层`
                     : model.isBoarding
                         ? '乘客正在依次进入，请点击目标楼层排队'
-                        : model.isElevatorFull
-                    ? '电梯已满，剩余乘客继续排队等待'
-                    : '当前层没有乘客；请点击左侧楼层色牌让 S1 移动';
+                        : model.isElevatorFullAt(cabinIndex)
+                    ? `${elevator.id} 已满，剩余乘客会继续排队等另一部电梯`
+                    : '当前层没有乘客；请点击左侧楼层色牌呼叫电梯';
             this.view.setInteractionMessage(message);
             return;
         }
@@ -214,19 +216,18 @@ export class GameController {
         const floor = this.view.floorAt(position);
         if (floor !== null) {
             const model = this.manager.model;
-            const queued = model.queueFloor(floor);
-            if (!queued && model.elevator.targetFloor === null && floor === model.elevator.currentFloor) {
-                this.view.setInteractionMessage(`S1 已在 ${floor} 层`);
-            } else if (!queued) {
+            const elevatorIndex = model.queueFloorForBestElevator(floor);
+            if (elevatorIndex === null) {
                 this.view.setInteractionMessage(`无法加入 ${floor} 层指令`);
             } else if (model.isBoarding) {
                 this.view.setInteractionMessage(`已加入 ${floor} 层，等待乘客依次上车后出发`);
             } else {
-                const pending = model.elevator.queue.length;
+                const elevator = model.elevators[elevatorIndex];
+                const pending = elevator.queue.length;
                 this.view.setInteractionMessage(
                     pending > 0
-                        ? `已追加 ${floor} 层，前方还有 ${pending} 个停站指令`
-                        : `S1 正在前往 ${floor} 层`,
+                        ? `${elevator.id} 已追加 ${floor} 层，前方还有 ${pending} 个停站指令`
+                        : `${elevator.id} 正在前往 ${floor} 层`,
                 );
             }
             return;

@@ -18,19 +18,38 @@ const BOARDING_INTERVAL = 0.22;
 const UNLOADING_INTERVAL = 0.28;
 const PATIENCE_WARNING_RATIO = 0.25;
 const WARNING_SOUND_INTERVAL = 0.8;
+const ELEVATOR_COUNT = 2;
 
 export class GameModel {
     readonly passengers: PassengerModel[] = [];
-    readonly elevator: ElevatorModel = {
-        currentFloor: 0,
-        targetFloor: null,
-        position: 0,
-        direction: ElevatorDirection.Idle,
-        capacity: 6,
-        passengers: [],
-        queue: [],
-        doorOpen: true,
-    };
+    readonly elevators: ElevatorModel[] = [
+        {
+            id: 'S1',
+            currentFloor: 0,
+            targetFloor: null,
+            position: 0,
+            direction: ElevatorDirection.Idle,
+            capacity: 6,
+            passengers: [],
+            queue: [],
+            doorOpen: true,
+        },
+        {
+            id: 'S2',
+            currentFloor: 0,
+            targetFloor: null,
+            position: 0,
+            direction: ElevatorDirection.Idle,
+            capacity: 6,
+            passengers: [],
+            queue: [],
+            doorOpen: true,
+        },
+    ];
+    get elevator(): ElevatorModel {
+        return this.elevators[0];
+    }
+    readonly elevator2: ElevatorModel = this.elevators[1];
     readonly economy: EconomyModel = {
         coins: 20,
         stars: 0,
@@ -55,16 +74,19 @@ export class GameModel {
     };
 
     private nextPassengerId = 1;
-    private readonly boardingQueue: number[] = [];
-    private readonly unloadingQueue: number[] = [];
+    private readonly boardingQueues: number[][] = Array.from({ length: ELEVATOR_COUNT }, () => []);
+    private readonly unloadingQueues: number[][] = Array.from({ length: ELEVATOR_COUNT }, () => []);
     private readonly boardedEvents: PassengerBoardedEvent[] = [];
     private readonly deliveredEvents: PassengerDeliveredEvent[] = [];
     private readonly warningEvents: PassengerWarningEvent[] = [];
-    private boardingTimer = 0;
-    private unloadingTimer = 0;
+    private readonly boardingTimers: number[] = Array.from({ length: ELEVATOR_COUNT }, () => 0);
+    private readonly unloadingTimers: number[] = Array.from({ length: ELEVATOR_COUNT }, () => 0);
     private warningTimer = 0;
-    private pendingArrivalDirection: ElevatorDirection | null = null;
-    private stopDeliveredCount = 0;
+    private readonly pendingArrivalDirections: Array<ElevatorDirection | null> = Array.from(
+        { length: ELEVATOR_COUNT },
+        () => null,
+    );
+    private readonly stopDeliveredCounts: number[] = Array.from({ length: ELEVATOR_COUNT }, () => 0);
 
     restore(snapshot: GameSnapshot | null): void {
         if (!snapshot || snapshot.version !== 1) {
@@ -118,23 +140,36 @@ export class GameModel {
     }
 
     get elevatorOccupancy(): number {
-        return this.elevator.passengers.length + this.boardingQueue.length;
+        return this.elevatorOccupancyAt(0);
     }
 
     get isElevatorFull(): boolean {
-        return this.elevatorOccupancy >= this.elevator.capacity;
+        return this.isElevatorFullAt(0);
     }
 
     get isBoarding(): boolean {
-        return this.boardingQueue.length > 0;
+        return this.boardingQueues.some((queue) => queue.length > 0);
     }
 
     get isUnloading(): boolean {
-        return this.unloadingQueue.length > 0;
+        return this.unloadingQueues.some((queue) => queue.length > 0);
     }
 
     get isElevatorMoving(): boolean {
-        return this.elevator.targetFloor !== null;
+        return this.elevators.some((elevator) => elevator.targetFloor !== null);
+    }
+
+    elevatorOccupancyAt(elevatorIndex: number): number {
+        const elevator = this.elevators[elevatorIndex];
+        if (!elevator) {
+            return 0;
+        }
+        return elevator.passengers.length + this.boardingQueues[elevatorIndex].length;
+    }
+
+    isElevatorFullAt(elevatorIndex: number): boolean {
+        const elevator = this.elevators[elevatorIndex];
+        return !!elevator && this.elevatorOccupancyAt(elevatorIndex) >= elevator.capacity;
     }
 
     getFloorQueue(floor: number): PassengerModel[] {
@@ -159,18 +194,51 @@ export class GameModel {
     }
 
     queueFloor(floor: number): boolean {
+        return this.queueFloorForElevator(floor, 0);
+    }
+
+    queueFloorForBestElevator(floor: number): number | null {
+        if (floor < 0 || floor >= this.progress.unlockedFloors) {
+            return null;
+        }
+        let bestIndex = 0;
+        let bestScore = Number.POSITIVE_INFINITY;
+        this.elevators.forEach((elevator, index) => {
+            const workload = elevator.queue.length
+                + (elevator.targetFloor === null ? 0 : 1)
+                + this.boardingQueues[index].length
+                + this.unloadingQueues[index].length;
+            const distance = Math.abs((elevator.targetFloor ?? elevator.position) - floor);
+            const score = workload * 100 + distance;
+            if (score < bestScore) {
+                bestScore = score;
+                bestIndex = index;
+            }
+        });
+        return this.queueFloorForElevator(floor, bestIndex) ? bestIndex : null;
+    }
+
+    queueFloorForElevator(floor: number, elevatorIndex: number): boolean {
+        const elevator = this.elevators[elevatorIndex];
         if (floor < 0 || floor >= this.progress.unlockedFloors) {
             return false;
         }
-        if (this.elevator.targetFloor === null && floor === this.elevator.currentFloor) {
-            this.elevator.doorOpen = true;
+        if (!elevator) {
             return false;
         }
-        return this.enqueueStops([floor]);
+        if (elevator.targetFloor === null && floor === elevator.currentFloor) {
+            elevator.doorOpen = true;
+            return false;
+        }
+        return this.enqueueStops([floor], elevatorIndex);
     }
 
     boardAtCurrentFloor(): number {
-        return this.boardPassengersAtCurrentFloor(() => true);
+        return this.boardAtElevator(0);
+    }
+
+    boardAtElevator(elevatorIndex: number): number {
+        return this.boardPassengersAtCurrentFloor(elevatorIndex, () => true);
     }
 
     update(deltaTime: number): void {
@@ -183,11 +251,13 @@ export class GameModel {
             return;
         }
         this.updatePatienceWarnings(deltaTime);
-        this.updateUnloading(deltaTime);
-        this.updateBoarding(deltaTime);
-        this.updateElevator(deltaTime);
+        this.elevators.forEach((_elevator, index) => {
+            this.updateUnloading(deltaTime, index);
+            this.updateBoarding(deltaTime, index);
+            this.updateElevator(deltaTime, index);
+        });
         this.progress.completed = this.economy.delivered >= this.progress.targetDeliveries
-            && this.unloadingQueue.length === 0;
+            && this.unloadingQueues.every((queue) => queue.length === 0);
     }
 
     extendFloor(): boolean {
@@ -265,10 +335,10 @@ export class GameModel {
         warningFloors.forEach((floor) => this.warningEvents.push({ floor }));
     }
 
-    private updateElevator(deltaTime: number): void {
-        const { elevator } = this;
+    private updateElevator(deltaTime: number, elevatorIndex: number): void {
+        const elevator = this.elevators[elevatorIndex];
         if (elevator.targetFloor === null) {
-            this.startNextStop();
+            this.startNextStop(elevatorIndex);
             return;
         }
 
@@ -286,35 +356,38 @@ export class GameModel {
         elevator.targetFloor = null;
         elevator.direction = ElevatorDirection.Idle;
         elevator.doorOpen = true;
-        if (!this.beginUnloadingAtCurrentFloor(arrivalDirection)) {
-            this.boardForArrivalDirection(arrivalDirection);
+        if (!this.beginUnloadingAtCurrentFloor(elevatorIndex, arrivalDirection)) {
+            this.boardForArrivalDirection(elevatorIndex, arrivalDirection);
         }
     }
 
-    private updateBoarding(deltaTime: number): void {
-        if (this.boardingQueue.length === 0) {
-            this.boardingTimer = 0;
+    private updateBoarding(deltaTime: number, elevatorIndex: number): void {
+        const boardingQueue = this.boardingQueues[elevatorIndex];
+        if (boardingQueue.length === 0) {
+            this.boardingTimers[elevatorIndex] = 0;
             return;
         }
-        this.boardingTimer += deltaTime;
-        while (this.boardingTimer >= BOARDING_INTERVAL && this.boardingQueue.length > 0) {
-            this.boardingTimer -= BOARDING_INTERVAL;
-            const passengerId = this.boardingQueue.shift();
+        this.boardingTimers[elevatorIndex] += deltaTime;
+        while (this.boardingTimers[elevatorIndex] >= BOARDING_INTERVAL && boardingQueue.length > 0) {
+            this.boardingTimers[elevatorIndex] -= BOARDING_INTERVAL;
+            const passengerId = boardingQueue.shift();
             const passenger = passengerId === undefined ? undefined : this.getPassenger(passengerId);
             if (!passenger || passenger.state !== PassengerState.Boarding) {
                 continue;
             }
             passenger.state = PassengerState.Riding;
-            this.elevator.passengers.push(passenger.id);
+            this.elevators[elevatorIndex].passengers.push(passenger.id);
             this.boardedEvents.push({
                 passengerId: passenger.id,
                 destinationFloor: passenger.destinationFloor,
+                elevatorIndex,
             });
         }
     }
 
-    private beginUnloadingAtCurrentFloor(arrivalDirection: ElevatorDirection): boolean {
-        const { elevator } = this;
+    private beginUnloadingAtCurrentFloor(elevatorIndex: number, arrivalDirection: ElevatorDirection): boolean {
+        const elevator = this.elevators[elevatorIndex];
+        const unloadingQueue = this.unloadingQueues[elevatorIndex];
         const deliveredIds = elevator.passengers.filter((id) => {
             return this.getPassenger(id)?.destinationFloor === elevator.currentFloor;
         });
@@ -326,40 +399,43 @@ export class GameModel {
             const passenger = this.getPassenger(id);
             if (passenger) {
                 passenger.state = PassengerState.Exiting;
-                this.unloadingQueue.push(id);
+                unloadingQueue.push(id);
             }
         });
-        this.pendingArrivalDirection = arrivalDirection;
-        this.stopDeliveredCount = 0;
-        this.unloadingTimer = 0;
-        return this.unloadingQueue.length > 0;
+        this.pendingArrivalDirections[elevatorIndex] = arrivalDirection;
+        this.stopDeliveredCounts[elevatorIndex] = 0;
+        this.unloadingTimers[elevatorIndex] = 0;
+        return unloadingQueue.length > 0;
     }
 
-    private updateUnloading(deltaTime: number): void {
-        if (this.unloadingQueue.length === 0) {
-            this.unloadingTimer = 0;
+    private updateUnloading(deltaTime: number, elevatorIndex: number): void {
+        const unloadingQueue = this.unloadingQueues[elevatorIndex];
+        if (unloadingQueue.length === 0) {
+            this.unloadingTimers[elevatorIndex] = 0;
             return;
         }
-        this.unloadingTimer += deltaTime;
-        while (this.unloadingTimer >= UNLOADING_INTERVAL && this.unloadingQueue.length > 0) {
-            this.unloadingTimer -= UNLOADING_INTERVAL;
-            const passengerId = this.unloadingQueue.shift();
+        this.unloadingTimers[elevatorIndex] += deltaTime;
+        while (this.unloadingTimers[elevatorIndex] >= UNLOADING_INTERVAL && unloadingQueue.length > 0) {
+            this.unloadingTimers[elevatorIndex] -= UNLOADING_INTERVAL;
+            const passengerId = unloadingQueue.shift();
             const passenger = passengerId === undefined ? undefined : this.getPassenger(passengerId);
             if (!passenger || passenger.state !== PassengerState.Exiting) {
                 continue;
             }
             passenger.state = PassengerState.Delivered;
-            this.elevator.passengers = this.elevator.passengers.filter((id) => id !== passenger.id);
+            const elevator = this.elevators[elevatorIndex];
+            elevator.passengers = elevator.passengers.filter((id) => id !== passenger.id);
             const patienceRatio = passenger.patience / passenger.maxPatience;
             this.economy.multiplierProgress += patienceRatio >= 0.6 ? 2 : 1;
             this.economy.delivered += 1;
             this.economy.coins += this.economy.multiplier;
-            this.stopDeliveredCount += 1;
+            this.stopDeliveredCounts[elevatorIndex] += 1;
             this.deliveredEvents.push({
                 passengerId: passenger.id,
-                floor: this.elevator.currentFloor,
-                stopDeliveredCount: this.stopDeliveredCount,
+                floor: elevator.currentFloor,
+                stopDeliveredCount: this.stopDeliveredCounts[elevatorIndex],
                 totalDelivered: this.economy.delivered,
+                elevatorIndex,
             });
         }
 
@@ -367,15 +443,15 @@ export class GameModel {
             this.economy.multiplier = Math.min(3, this.economy.multiplier + 1);
             this.economy.multiplierProgress = 0;
         }
-        if (this.unloadingQueue.length === 0 && this.pendingArrivalDirection !== null) {
-            const arrivalDirection = this.pendingArrivalDirection;
-            this.pendingArrivalDirection = null;
-            this.boardForArrivalDirection(arrivalDirection);
+        if (unloadingQueue.length === 0 && this.pendingArrivalDirections[elevatorIndex] !== null) {
+            const arrivalDirection = this.pendingArrivalDirections[elevatorIndex];
+            this.pendingArrivalDirections[elevatorIndex] = null;
+            this.boardForArrivalDirection(elevatorIndex, arrivalDirection);
         }
     }
 
-    private boardForArrivalDirection(arrivalDirection: ElevatorDirection): void {
-        this.boardPassengersAtCurrentFloor((passenger) => {
+    private boardForArrivalDirection(elevatorIndex: number, arrivalDirection: ElevatorDirection): void {
+        this.boardPassengersAtCurrentFloor(elevatorIndex, (passenger) => {
             return Math.sign(passenger.destinationFloor - passenger.originFloor) === arrivalDirection;
         });
     }
@@ -385,15 +461,20 @@ export class GameModel {
     }
 
     private applyUpgradeEffects(): void {
-        this.elevator.capacity = 6 + this.upgrades.capacityLevel;
+        this.elevators.forEach((elevator) => {
+            elevator.capacity = 6 + this.upgrades.capacityLevel;
+        });
     }
 
-    private boardPassengersAtCurrentFloor(predicate: (passenger: PassengerModel) => boolean): number {
-        const { elevator } = this;
-        if (!elevator.doorOpen || this.unloadingQueue.length > 0) {
+    private boardPassengersAtCurrentFloor(
+        elevatorIndex: number,
+        predicate: (passenger: PassengerModel) => boolean,
+    ): number {
+        const elevator = this.elevators[elevatorIndex];
+        if (!elevator || !elevator.doorOpen || this.unloadingQueues[elevatorIndex].length > 0) {
             return 0;
         }
-        const room = elevator.capacity - this.elevatorOccupancy;
+        const room = elevator.capacity - this.elevatorOccupancyAt(elevatorIndex);
         if (room <= 0) {
             return 0;
         }
@@ -411,13 +492,13 @@ export class GameModel {
         }
         boarding.forEach((passenger) => {
             passenger.state = PassengerState.Boarding;
-            this.boardingQueue.push(passenger.id);
+            this.boardingQueues[elevatorIndex].push(passenger.id);
         });
         return boarding.length;
     }
 
-    private enqueueStops(floors: number[]): boolean {
-        const { elevator } = this;
+    private enqueueStops(floors: number[], elevatorIndex: number): boolean {
+        const elevator = this.elevators[elevatorIndex];
         let added = false;
         floors.forEach((floor) => {
             if (floor < 0 || floor >= this.progress.unlockedFloors) {
@@ -426,13 +507,17 @@ export class GameModel {
             elevator.queue.push(floor);
             added = true;
         });
-        this.startNextStop();
+        this.startNextStop(elevatorIndex);
         return added;
     }
 
-    private startNextStop(): void {
-        const { elevator } = this;
-        if (elevator.targetFloor !== null || this.boardingQueue.length > 0 || this.unloadingQueue.length > 0) {
+    private startNextStop(elevatorIndex: number): void {
+        const elevator = this.elevators[elevatorIndex];
+        if (
+            elevator.targetFloor !== null
+            || this.boardingQueues[elevatorIndex].length > 0
+            || this.unloadingQueues[elevatorIndex].length > 0
+        ) {
             return;
         }
         while (elevator.queue.length > 0) {
@@ -470,22 +555,28 @@ export class GameModel {
     }
 
     private resetElevatorAndQueues(): void {
-        this.elevator.currentFloor = 0;
-        this.elevator.targetFloor = null;
-        this.elevator.position = 0;
-        this.elevator.direction = ElevatorDirection.Idle;
-        this.elevator.passengers = [];
-        this.elevator.queue = [];
-        this.elevator.doorOpen = true;
-        this.boardingQueue.length = 0;
-        this.unloadingQueue.length = 0;
+        this.elevators.forEach((elevator) => {
+            elevator.currentFloor = 0;
+            elevator.targetFloor = null;
+            elevator.position = 0;
+            elevator.direction = ElevatorDirection.Idle;
+            elevator.passengers = [];
+            elevator.queue = [];
+            elevator.doorOpen = true;
+        });
+        this.boardingQueues.forEach((queue) => {
+            queue.length = 0;
+        });
+        this.unloadingQueues.forEach((queue) => {
+            queue.length = 0;
+        });
         this.boardedEvents.length = 0;
         this.deliveredEvents.length = 0;
         this.warningEvents.length = 0;
-        this.boardingTimer = 0;
-        this.unloadingTimer = 0;
+        this.boardingTimers.fill(0);
+        this.unloadingTimers.fill(0);
         this.warningTimer = 0;
-        this.pendingArrivalDirection = null;
-        this.stopDeliveredCount = 0;
+        this.pendingArrivalDirections.fill(null);
+        this.stopDeliveredCounts.fill(0);
     }
 }

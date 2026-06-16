@@ -14,6 +14,7 @@ import { EventBus } from '../core/EventBus';
 import { GameModel } from '../models/GameModel';
 import {
     ElevatorDirection,
+    ElevatorModel,
     PassengerDeliveredEvent,
     PassengerModel,
     PassengerState,
@@ -32,12 +33,11 @@ const PURPLE = new Color(106, 49, 164, 255);
 const CYAN = new Color(22, 158, 181, 255);
 const OFFICE_WALL = new Color(48, 50, 53, 245);
 const OFFICE_WALL_ALT = new Color(57, 59, 62, 245);
-const TOWER_BOTTOM = -355;
-const TOWER_TOP = 415;
+const TOWER_BOTTOM = -425;
+const TOWER_TOP = 355;
 const FLOOR_GAP = 180;
 const FLOOR_BASE_Y = -285;
-const CABIN_SAFE_TOP = TOWER_TOP - 95;
-const CABIN_SAFE_BOTTOM = TOWER_BOTTOM + 75;
+const MIN_VISIBLE_FLOORS = 12;
 
 export interface GameHitAreas {
     floorAt(position: Vec3): number | null;
@@ -54,11 +54,11 @@ export class GameView implements GameHitAreas {
     private readonly labels: Record<string, Label> = {};
     private readonly floorYs: number[] = [];
     private floorHitHalfHeight = 52;
-    private cabinY = 0;
+    private clickableFloors = 0;
+    private readonly cabinHitAreas: Array<{ index: number; x: number; y: number; width: number; height: number }> = [];
     private menuOpen = false;
     private interactionMessage = '';
     private towerScrollOffset = 0;
-    private lastElevatorPosition = 0;
     private deliveryFeedback: (PassengerDeliveredEvent & { startedAt: number }) | null = null;
 
     constructor(parent: Node, events: EventBus) {
@@ -99,7 +99,6 @@ export class GameView implements GameHitAreas {
         this.graphics.clear();
         this.hidePassengerDestinationLabels();
         this.hideDynamicTowerLabels();
-        this.followElevator(model);
         this.drawBackground();
         this.drawTower(model);
         this.drawDeliveryFeedback(model);
@@ -129,7 +128,7 @@ export class GameView implements GameHitAreas {
         if (!this.isTowerViewport(position)) {
             return null;
         }
-        for (let floor = 0; floor < this.floorYs.length; floor += 1) {
+        for (let floor = 0; floor < Math.min(this.clickableFloors, this.floorYs.length); floor += 1) {
             if (
                 Math.abs(position.y - this.floorYs[floor]) <= this.floorHitHalfHeight
                 && position.x > -340
@@ -142,10 +141,19 @@ export class GameView implements GameHitAreas {
     }
 
     isCabin(position: Vec3): boolean {
-        return this.isTowerViewport(position)
-            && position.x > 195
-            && position.x < 340
-            && Math.abs(position.y - this.cabinY) < 82;
+        return this.cabinAt(position) !== null;
+    }
+
+    cabinAt(position: Vec3): number | null {
+        if (!this.isTowerViewport(position)) {
+            return null;
+        }
+        const hit = this.cabinHitAreas.find((area) => {
+            return position.x > area.x
+                && position.x < area.x + area.width
+                && Math.abs(position.y - area.y) < area.height * 0.5;
+        });
+        return hit?.index ?? null;
     }
 
     isTowerViewport(position: Vec3): boolean {
@@ -269,7 +277,7 @@ export class GameView implements GameHitAreas {
     }
 
     private drawTower(model: GameModel): void {
-        const floorCount = model.progress.unlockedFloors;
+        const floorCount = Math.max(MIN_VISIBLE_FLOORS, model.progress.unlockedFloors);
         const floorGap = FLOOR_GAP;
         const bottomY = FLOOR_BASE_Y + this.towerScrollOffset;
         const towerLeft = -340;
@@ -277,7 +285,9 @@ export class GameView implements GameHitAreas {
         const s2Left = 105;
         const s1Left = 220;
         const shaftWidth = 100;
+        this.clickableFloors = model.progress.unlockedFloors;
         this.floorYs.length = 0;
+        this.cabinHitAreas.length = 0;
         this.floorHitHalfHeight = floorGap * 0.48;
 
         for (let floor = 0; floor < floorCount; floor += 1) {
@@ -296,44 +306,28 @@ export class GameView implements GameHitAreas {
                 this.graphics.fill();
             }
             this.line(towerLeft, y - floorGap * 0.48, towerRight, y - floorGap * 0.48, new Color(12, 13, 15, 255), 3);
-            this.drawFloorMarker(floor, y);
-            this.drawOfficeDetails(floor, y, floorGap);
-            this.drawPassengers(model, floor, y);
+            this.drawFloorMarker(floor, y, floor < model.progress.unlockedFloors);
+            this.drawOfficeDetails(floor, y, floorGap, floor < model.progress.unlockedFloors);
+            if (floor < model.progress.unlockedFloors) {
+                this.drawPassengers(model, floor, y);
+            }
             this.drawEmptyShaft(s2Left, y, floorGap, 'S2');
             this.drawEmptyShaft(s1Left, y, floorGap, 'S1');
         }
 
-        const elevatorY = bottomY + model.elevator.position * floorGap;
-        this.cabinY = elevatorY;
-        if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
-            this.drawCabin(model, s1Left, elevatorY, shaftWidth);
-        }
-    }
-
-    private followElevator(model: GameModel): void {
-        const position = model.elevator.position;
-        const moved = Math.abs(position - this.lastElevatorPosition) > 0.001;
-        this.lastElevatorPosition = position;
-        if (!moved) {
-            return;
-        }
-
-        const cabinY = FLOOR_BASE_Y + position * FLOOR_GAP + this.towerScrollOffset;
-        let nextOffset = this.towerScrollOffset;
-        if (cabinY > CABIN_SAFE_TOP) {
-            nextOffset -= cabinY - CABIN_SAFE_TOP;
-        } else if (cabinY < CABIN_SAFE_BOTTOM) {
-            nextOffset += CABIN_SAFE_BOTTOM - cabinY;
-        }
-        this.towerScrollOffset = this.clampTowerScroll(
-            nextOffset,
-            model.progress.unlockedFloors,
-        );
+        const elevatorXs = [s1Left, s2Left];
+        model.elevators.forEach((elevator, index) => {
+            const elevatorY = bottomY + elevator.position * floorGap;
+            if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
+                this.drawCabin(model, elevator, index, elevatorXs[index], elevatorY, shaftWidth);
+            }
+        });
     }
 
     private clampTowerScroll(offset: number, floorCount: number): number {
-        const naturalTop = FLOOR_BASE_Y + Math.max(0, floorCount - 1) * FLOOR_GAP;
-        const minOffset = Math.min(0, CABIN_SAFE_TOP - naturalTop);
+        const visibleFloors = Math.max(MIN_VISIBLE_FLOORS, floorCount);
+        const naturalTop = FLOOR_BASE_Y + Math.max(0, visibleFloors - 1) * FLOOR_GAP;
+        const minOffset = Math.min(0, TOWER_TOP - FLOOR_GAP * 0.55 - naturalTop);
         return Math.max(minOffset, Math.min(0, offset));
     }
 
@@ -348,17 +342,17 @@ export class GameView implements GameHitAreas {
         this.line(-340, TOWER_TOP, 340, TOWER_TOP, new Color(120, 122, 126, 180), 2);
     }
 
-    private drawFloorMarker(floor: number, y: number): void {
+    private drawFloorMarker(floor: number, y: number, unlocked: boolean): void {
         const floorLabel = String(floor).padStart(2, '0');
         const color = this.floorColor(floor);
-        this.graphics.fillColor = color;
+        this.graphics.fillColor = unlocked ? color : new Color(76, 78, 82, 210);
         this.graphics.rect(-340, y - 55, 76, 110);
         this.graphics.fill();
-        this.drawText(`floor-${floor}`, floorLabel, -326, y + 23, 32, PAPER, 64);
-        this.drawDestinationShape(floor, -302, y - 25, 15, PAPER);
+        this.drawText(`floor-${floor}`, floorLabel, -326, y + 23, 32, unlocked ? PAPER : MUTED, 64);
+        this.drawDestinationShape(floor, -302, y - 25, 15, unlocked ? PAPER : MUTED);
     }
 
-    private drawOfficeDetails(floor: number, y: number, floorGap: number): void {
+    private drawOfficeDetails(floor: number, y: number, floorGap: number, unlocked: boolean): void {
         this.graphics.fillColor = new Color(27, 29, 31, 255);
         this.graphics.roundRect(-238, y - 34, 88, 68, 3);
         this.graphics.fill();
@@ -370,7 +364,15 @@ export class GameView implements GameHitAreas {
         this.graphics.roundRect(-135, y - 28, 150, 56, 3);
         this.graphics.fill();
         this.strokeRect(-135, y - 28, 150, 56, new Color(116, 118, 121, 255), 1);
-        this.drawText(`company-${floor}`, companyNames[floor % companyNames.length], -112, y + 2, 17, PAPER, 120);
+        this.drawText(
+            `company-${floor}`,
+            unlocked ? companyNames[floor % companyNames.length] : '待招商楼层',
+            -112,
+            y + 2,
+            17,
+            unlocked ? PAPER : MUTED,
+            120,
+        );
         this.graphics.fillColor = new Color(237, 232, 222, 90);
         this.graphics.circle(-222, y + floorGap * 0.34, 4);
         this.graphics.circle(-86, y + floorGap * 0.34, 4);
@@ -444,7 +446,15 @@ export class GameView implements GameHitAreas {
         this.graphics.stroke();
     }
 
-    private drawCabin(model: GameModel, x: number, y: number, width: number): void {
+    private drawCabin(
+        model: GameModel,
+        elevator: ElevatorModel,
+        elevatorIndex: number,
+        x: number,
+        y: number,
+        width: number,
+    ): void {
+        this.cabinHitAreas.push({ index: elevatorIndex, x, y, width, height: 164 });
         this.graphics.fillColor = new Color(194, 199, 203, 255);
         this.graphics.strokeColor = new Color(15, 16, 18, 255);
         this.graphics.lineWidth = 3;
@@ -456,18 +466,26 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.line(x + width * 0.5, y - 42, x + width * 0.5, y + 42, MUTED, 2);
 
-        const target = model.elevator.targetFloor;
-        const direction = model.elevator.direction === ElevatorDirection.Up
+        const target = elevator.targetFloor;
+        const direction = elevator.direction === ElevatorDirection.Up
             ? '↑'
-            : model.elevator.direction === ElevatorDirection.Down
+            : elevator.direction === ElevatorDirection.Down
                 ? '↓'
                 : '';
         this.graphics.fillColor = INK;
         this.graphics.rect(x + 17, y + 54, width - 34, 25);
         this.graphics.fill();
-        this.drawText('cabin-target', target === null ? 'S1' : `${direction}${target}`, x + 37, y + 66, 14, PAPER, 48);
+        this.drawText(
+            `cabin-target-${elevatorIndex}`,
+            target === null ? elevator.id : `${direction}${target}`,
+            x + 37,
+            y + 66,
+            14,
+            PAPER,
+            48,
+        );
 
-        model.elevator.passengers.slice(0, model.elevator.capacity).forEach((id, index) => {
+        elevator.passengers.slice(0, elevator.capacity).forEach((id, index) => {
             const passenger = model.getPassenger(id);
             if (passenger) {
                 const column = index % 3;
@@ -523,9 +541,11 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.labels.build.color = PAPER;
         this.labels.build.string = `增层\n${model.floorExtensionCost}`;
-        const occupancy = model.elevatorOccupancy;
-        const capacityState = model.isElevatorFull ? ' 已满' : '';
-        this.labels.floorHint.string = `金币 ${model.economy.coins}    星星 ${model.economy.stars}    载客 ${occupancy}/${model.elevator.capacity}${capacityState}`;
+        const occupancy = model.elevators.reduce((sum, _elevator, index) => {
+            return sum + model.elevatorOccupancyAt(index);
+        }, 0);
+        const capacity = model.elevators.reduce((sum, elevator) => sum + elevator.capacity, 0);
+        this.labels.floorHint.string = `金币 ${model.economy.coins}    星星 ${model.economy.stars}    载客 ${occupancy}/${capacity}`;
     }
 
     private drawCompletion(model: GameModel): void {
@@ -536,7 +556,7 @@ export class GameView implements GameHitAreas {
         this.labels.complete.node.active = true;
         this.labels.complete.node.setPosition(-275, 105);
         this.labels.complete.string = `运营升级 · 选择一项`;
-        this.drawUpgradeCard(-290, UpgradeType.Capacity, '扩容', `轿厢容量 +1\n当前 ${model.elevator.capacity}`);
+        this.drawUpgradeCard(-290, UpgradeType.Capacity, '扩容', `每部容量 +1\n当前 ${model.elevator.capacity}`);
         this.drawUpgradeCard(-95, UpgradeType.Speed, '提速', `运行速度 +15%\n等级 ${model.upgrades.speedLevel}`);
         this.drawUpgradeCard(100, UpgradeType.Patience, '安抚', `耐心上限 +4秒\n等级 ${model.upgrades.patienceLevel}`);
     }
@@ -607,7 +627,7 @@ export class GameView implements GameHitAreas {
                 key.startsWith('shaft-')
                 || key.startsWith('floor-')
                 || key.startsWith('company-')
-                || key === 'cabin-target'
+                || key.startsWith('cabin-target-')
                 || key === 'deliveryCount'
             ) {
                 label.node.active = false;
