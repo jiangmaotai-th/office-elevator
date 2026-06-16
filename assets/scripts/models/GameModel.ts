@@ -199,6 +199,31 @@ export class GameModel {
             .sort((left, right) => left.id - right.id);
     }
 
+    getFloorLine(floor: number): PassengerModel[] {
+        return this.passengers
+            .filter((passenger) => {
+                return passenger.originFloor === floor
+                    && (passenger.state === PassengerState.Waiting || passenger.state === PassengerState.Boarding);
+            })
+            .sort((left, right) => left.id - right.id);
+    }
+
+    getPassengerBoardingElevatorIndex(passenger: PassengerModel): number | null {
+        if (passenger.state !== PassengerState.Boarding) {
+            return null;
+        }
+        const index = this.boardingQueues.findIndex((queue) => queue.includes(passenger.id));
+        return index < 0 ? null : index;
+    }
+
+    getPassengerBoardingProgress(passenger: PassengerModel): number {
+        const elevatorIndex = this.getPassengerBoardingElevatorIndex(passenger);
+        if (elevatorIndex === null || this.boardingQueues[elevatorIndex][0] !== passenger.id) {
+            return 0;
+        }
+        return Math.max(0, Math.min(1, this.boardingTimers[elevatorIndex] / BOARDING_INTERVAL));
+    }
+
     drainBoardedEvents(): PassengerBoardedEvent[] {
         return this.boardedEvents.splice(0);
     }

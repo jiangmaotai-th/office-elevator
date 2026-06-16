@@ -445,12 +445,28 @@ export class GameView implements GameHitAreas {
     }
 
     private drawPassengers(model: GameModel, floor: number, y: number): void {
-        const passengers = model.getFloorQueue(floor).slice(0, 8);
+        const passengers = model.getFloorLine(floor).slice(0, 8);
         passengers.forEach((passenger, index) => {
             // The oldest passenger is closest to the elevator on the right.
             const x = 75 - index * 40;
-            this.drawPassenger(passenger, x, y, model.getPassengerWaitProgress(passenger), model.shouldShowPassengerTimer(passenger));
+            this.drawPassenger(
+                passenger,
+                this.getPassengerX(model, passenger, x),
+                y,
+                model.getPassengerWaitProgress(passenger),
+                model.shouldShowPassengerTimer(passenger),
+            );
         });
+    }
+
+    private getPassengerX(model: GameModel, passenger: PassengerModel, queueX: number): number {
+        const elevatorIndex = model.getPassengerBoardingElevatorIndex(passenger);
+        if (elevatorIndex === null) {
+            return queueX;
+        }
+        const progress = model.getPassengerBoardingProgress(passenger);
+        const cabinDoorX = elevatorIndex === 0 ? 230 : 115;
+        return queueX + (cabinDoorX - queueX) * progress;
     }
 
     private drawPassenger(
@@ -460,9 +476,6 @@ export class GameView implements GameHitAreas {
         waitProgress: number,
         showTimer: boolean,
     ): void {
-        if (passenger.state === PassengerState.Boarding) {
-            x += 34;
-        }
         const clothingColor = this.floorColor(passenger.destinationFloor);
         const female = passenger.id % 2 === 0;
         this.graphics.fillColor = new Color(238, 199, 165, 255);

@@ -3,9 +3,17 @@ import { GameManager } from '../managers/GameManager';
 import { GameView } from '../views/GameView';
 
 const MAX_WAITING_PASSENGERS = 18;
+const PASSENGER_APPEAR_INTERVAL = 0.18;
+
+interface PendingPassengerSpawn {
+    origin: number;
+    destination: number;
+}
 
 export class GameController {
     private spawnTimer = 0;
+    private passengerAppearTimer = 0;
+    private readonly pendingPassengerSpawns: PendingPassengerSpawn[] = [];
     private activeElevatorIndex = 0;
     private pointerDown = false;
     private pointerDragged = false;
@@ -34,6 +42,7 @@ export class GameController {
     }
 
     update(deltaTime: number): void {
+        this.updatePendingPassengerSpawns(deltaTime);
         this.manager.update(deltaTime);
         const model = this.manager.model;
         if (!model.progress.started || model.progress.completed || model.progress.failed) {
@@ -170,6 +179,8 @@ export class GameController {
             if (this.view.isRestartButton(position)) {
                 this.manager.model.restartGame();
                 this.spawnTimer = 0;
+                this.passengerAppearTimer = 0;
+                this.pendingPassengerSpawns.length = 0;
                 this.view.resetTowerScroll();
                 this.view.setInteractionMessage('准备重新开始，点击开始运营');
                 this.manager.saveNow();
@@ -180,6 +191,9 @@ export class GameController {
             const upgrade = this.view.upgradeAt(position);
             if (upgrade) {
                 this.manager.model.chooseUpgrade(upgrade);
+                this.spawnTimer = 0;
+                this.passengerAppearTimer = 0;
+                this.pendingPassengerSpawns.length = 0;
                 this.manager.saveNow();
                 this.view.setInteractionMessage('升级完成，点击开始下一天');
             }
@@ -189,6 +203,8 @@ export class GameController {
             if (this.view.isStartButton(position)) {
                 this.manager.model.startRun();
                 this.spawnTimer = 0;
+                this.passengerAppearTimer = 0;
+                this.pendingPassengerSpawns.length = 0;
                 this.seedPassengers();
                 this.view.setInteractionMessage('运营开始，先选择 S1 或 S2 再点击楼层');
                 this.manager.saveNow();
@@ -268,7 +284,7 @@ export class GameController {
     }
 
     private spawnPassenger(): void {
-        const waitingCount = this.manager.model.waitingPassengers.length;
+        const waitingCount = this.manager.model.waitingPassengers.length + this.pendingPassengerSpawns.length;
         if (waitingCount >= MAX_WAITING_PASSENGERS) {
             return;
         }
@@ -286,11 +302,31 @@ export class GameController {
             while (destination === origin) {
                 destination = Math.floor(Math.random() * floorCount);
             }
-            this.manager.model.createPassenger(origin, destination);
+            this.pendingPassengerSpawns.push({ origin, destination });
             created += 1;
         }
         this.view.showQueueIncrease(origin, created);
         return created;
+    }
+
+    private updatePendingPassengerSpawns(deltaTime: number): void {
+        if (!this.manager.model.progress.started || this.pendingPassengerSpawns.length === 0) {
+            this.passengerAppearTimer = 0;
+            return;
+        }
+        this.passengerAppearTimer += deltaTime;
+        while (this.pendingPassengerSpawns.length > 0) {
+            const interval = this.manager.model.waitingPassengers.length === 0 ? 0 : PASSENGER_APPEAR_INTERVAL;
+            if (this.passengerAppearTimer < interval) {
+                return;
+            }
+            this.passengerAppearTimer = interval === 0 ? 0 : this.passengerAppearTimer - interval;
+            const spawn = this.pendingPassengerSpawns.shift();
+            if (!spawn) {
+                return;
+            }
+            this.manager.model.createPassenger(spawn.origin, spawn.destination);
+        }
     }
 
     private pickPassengerOrigin(): number {

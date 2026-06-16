@@ -67,6 +67,31 @@ function testManualBoardingIgnoresDirection(): void {
     assert(model.drainBoardedEvents().length === 1, 'the second boarding should emit a separate sound event');
 }
 
+function testBoardingPassengersRemainInVisibleLineUntilTheyEnter(): void {
+    const model = createRunningModel();
+    const first = model.createPassenger(0, 2);
+    const second = model.createPassenger(0, 1);
+
+    assert(model.boardAtCurrentFloor() === 2, 'both passengers should be reserved for sequential boarding');
+    assert(model.getFloorQueue(0).length === 0, 'reserved passengers should leave the interactive waiting queue');
+    assert(
+        model.getFloorLine(0).map((passenger) => passenger.id).join(',') === `${first.id},${second.id}`,
+        'reserved passengers should remain visible in the floor line',
+    );
+    assert(model.getPassengerBoardingProgress(first) === 0, 'the first passenger should start walking from the queue');
+    assert(model.getPassengerBoardingProgress(second) === 0, 'later passengers should wait for their turn');
+
+    model.update(0.11);
+    assert(model.getPassengerBoardingProgress(first) > 0, 'the queue head should animate toward the cabin');
+    assert(model.getPassengerBoardingProgress(second) === 0, 'the second passenger should not move before the first enters');
+
+    model.update(0.12);
+    assert(first.state === PassengerState.Riding, 'the first passenger should enter the cabin at the beat');
+    assert(second.state === PassengerState.Boarding, 'the second passenger should still be queued for the next beat');
+    assert(model.getFloorLine(0).map((passenger) => passenger.id).join(',') === `${second.id}`, 'only the remaining passenger should stay visible');
+    assert(model.drainBoardedEvents().length === 1, 'entering the cabin should emit exactly one boarding sound event');
+}
+
 function testPassengerWaitTimingMatchesFortySecondRule(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
@@ -426,6 +451,7 @@ function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
 
 testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
+testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
 testPassengerWaitTimingMatchesFortySecondRule();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
