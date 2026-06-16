@@ -76,6 +76,7 @@ export class GameView implements GameHitAreas {
     private interactionMessage = '';
     private towerScrollOffset = 0;
     private deliveryFeedback: (PassengerDeliveredEvent & { startedAt: number }) | null = null;
+    private readonly queueIncreaseFeedbacks: Array<{ floor: number; count: number; startedAt: number }> = [];
 
     constructor(parent: Node, events: EventBus) {
         this.root = new Node('GameView');
@@ -117,6 +118,7 @@ export class GameView implements GameHitAreas {
         this.hideDynamicTowerLabels();
         this.drawBackground();
         this.drawTower(model);
+        this.drawQueueIncreaseFeedbacks();
         this.drawDeliveryFeedback(model);
         this.drawTowerViewportMasks();
         this.drawHeader(model);
@@ -235,6 +237,16 @@ export class GameView implements GameHitAreas {
 
     setInteractionMessage(message: string): void {
         this.interactionMessage = message;
+    }
+
+    showQueueIncrease(floor: number, count: number): void {
+        if (count <= 0) {
+            return;
+        }
+        this.queueIncreaseFeedbacks.push({ floor, count, startedAt: Date.now() });
+        if (this.queueIncreaseFeedbacks.length > 8) {
+            this.queueIncreaseFeedbacks.shift();
+        }
     }
 
     private createLabels(): void {
@@ -378,7 +390,7 @@ export class GameView implements GameHitAreas {
     }
 
     private drawFloorMarker(floor: number, y: number, unlocked: boolean): void {
-        const floorLabel = String(floor).padStart(2, '0');
+        const floorLabel = this.formatFloorLabel(floor);
         const color = this.floorColor(floor);
         this.graphics.fillColor = unlocked ? color : new Color(76, 78, 82, 210);
         this.graphics.rect(-340, y - 55, 76, 110);
@@ -437,12 +449,17 @@ export class GameView implements GameHitAreas {
         passengers.forEach((passenger, index) => {
             // The oldest passenger is closest to the elevator on the right.
             const x = 75 - index * 40;
-            const patienceRatio = passenger.patience / passenger.maxPatience;
-            this.drawPassenger(passenger, x, y, patienceRatio);
+            this.drawPassenger(passenger, x, y, model.getPassengerWaitProgress(passenger), model.shouldShowPassengerTimer(passenger));
         });
     }
 
-    private drawPassenger(passenger: PassengerModel, x: number, y: number, patienceRatio: number): void {
+    private drawPassenger(
+        passenger: PassengerModel,
+        x: number,
+        y: number,
+        waitProgress: number,
+        showTimer: boolean,
+    ): void {
         if (passenger.state === PassengerState.Boarding) {
             x += 34;
         }
@@ -459,7 +476,7 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.drawText(
             `passenger-destination-${passenger.id}`,
-            String(passenger.destinationFloor).padStart(2, '0'),
+            this.formatFloorLabel(passenger.destinationFloor),
             x - 11,
             y - 4,
             10,
@@ -480,13 +497,12 @@ export class GameView implements GameHitAreas {
             this.graphics.fill();
         }
 
-        const elapsedRatio = Math.max(0, Math.min(1, 1 - patienceRatio));
-        if (elapsedRatio < 0.5) {
+        if (!showTimer) {
             return;
         }
-        this.graphics.strokeColor = patienceRatio <= 0.25 ? DANGER : new Color(225, 220, 211, 170);
+        this.graphics.strokeColor = waitProgress >= 0.75 ? DANGER : new Color(225, 220, 211, 170);
         this.graphics.lineWidth = 2;
-        this.graphics.arc(x, y, 25, Math.PI / 2, Math.PI / 2 + Math.PI * 2 * elapsedRatio, false);
+        this.graphics.arc(x, y, 25, Math.PI / 2, Math.PI / 2 + Math.PI * 2 * waitProgress, false);
         this.graphics.stroke();
     }
 
@@ -525,7 +541,7 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.drawText(
             `cabin-target-${elevatorIndex}`,
-            target === null ? `${selected ? '●' : ''}${elevator.id}` : `${direction}${target}`,
+            target === null ? `${selected ? '●' : ''}${elevator.id}` : `${direction}${this.formatFloorLabel(target)}`,
             x + 37,
             y + 66,
             14,
@@ -543,7 +559,7 @@ export class GameView implements GameHitAreas {
                 this.graphics.fill();
                 this.drawText(
                     `cabin-passenger-${id}`,
-                    String(passenger.destinationFloor),
+                    this.formatFloorLabel(passenger.destinationFloor),
                     x + 18 + column * 22,
                     y + 2 - row * 23,
                     8,
@@ -577,7 +593,7 @@ export class GameView implements GameHitAreas {
             return;
         }
         const progress = Math.min(1, (Date.now() - feedback.startedAt) / 650);
-        this.drawPassenger(passenger, 205 - progress * 62, floorY, 1);
+        this.drawPassenger(passenger, 205 - progress * 62, floorY, 1, false);
         this.graphics.fillColor = new Color(22, 23, 25, 230);
         this.graphics.roundRect(95, floorY + 29, 94, 34, 6);
         this.graphics.fill();
@@ -626,6 +642,33 @@ export class GameView implements GameHitAreas {
         this.labels.start.node.active = true;
         this.labels.start.color = PAPER;
         this.labels.start.string = '开始运营';
+    }
+
+    private drawQueueIncreaseFeedbacks(): void {
+        const now = Date.now();
+        for (let index = this.queueIncreaseFeedbacks.length - 1; index >= 0; index -= 1) {
+            const feedback = this.queueIncreaseFeedbacks[index];
+            const age = now - feedback.startedAt;
+            if (age > 900) {
+                this.queueIncreaseFeedbacks.splice(index, 1);
+                continue;
+            }
+            const floorY = this.floorYs[feedback.floor];
+            if (floorY === undefined || floorY < TOWER_BOTTOM || floorY > TOWER_TOP) {
+                continue;
+            }
+            const progress = age / 900;
+            const alpha = 255 - Math.round(progress * 200);
+            this.drawText(
+                `queue-increase-${index}`,
+                `+${feedback.count}`,
+                96,
+                floorY + 34 + progress * 26,
+                23,
+                new Color(247, 243, 237, alpha),
+                58,
+            );
+        }
     }
 
     private drawCompletion(model: GameModel): void {
@@ -709,6 +752,7 @@ export class GameView implements GameHitAreas {
                 || key.startsWith('company-')
                 || key.startsWith('cabin-target-')
                 || key.startsWith('cabin-passenger-')
+                || key.startsWith('queue-increase-')
                 || key.startsWith('start-')
                 || key === 'deliveryCount'
             ) {
@@ -719,6 +763,10 @@ export class GameView implements GameHitAreas {
 
     private floorColor(floor: number): Color {
         return DESTINATION_COLORS[floor % DESTINATION_COLORS.length];
+    }
+
+    private formatFloorLabel(floor: number): string {
+        return floor === 0 ? 'G' : String(floor).padStart(2, '0');
     }
 
     private drawDestinationShape(floor: number, x: number, y: number, radius: number, color?: Color): void {

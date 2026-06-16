@@ -27,6 +27,7 @@ function testRunWaitsForExplicitStart(): void {
     const model = new GameModel();
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 1;
+    passenger.waitElapsed = 0.99;
     passenger.patience = 0.01;
 
     model.update(1);
@@ -64,6 +65,26 @@ function testManualBoardingIgnoresDirection(): void {
     model.update(0.22);
     assert(model.elevator.passengers.length === 2, 'the second passenger should board on the next interval');
     assert(model.drainBoardedEvents().length === 1, 'the second boarding should emit a separate sound event');
+}
+
+function testPassengerWaitTimingMatchesFortySecondRule(): void {
+    const model = createRunningModel();
+    const passenger = model.createPassenger(0, 2);
+
+    assert(passenger.maxPatience === 40, 'base passenger wait time should be 40 seconds');
+    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should stay hidden before 20 seconds');
+    assert(model.warningFloors.length === 0, 'warning should stay silent before 30 seconds');
+
+    model.update(19.9);
+    assert(!model.shouldShowPassengerTimer(passenger), 'timer ring should still be hidden just before 20 seconds');
+    model.update(0.2);
+    assert(model.shouldShowPassengerTimer(passenger), 'timer ring should appear at 20 seconds');
+    assert(model.warningFloors.length === 0, 'warning should not start at 20 seconds');
+
+    model.update(9.9);
+    assert(model.warningFloors.includes(0), 'warning should start at 30 seconds');
+    model.update(10);
+    assert(model.progress.failed, 'the run should fail when the passenger reaches 40 seconds');
 }
 
 function testAutomaticBoardingMatchesArrivalDirection(): void {
@@ -123,6 +144,7 @@ function testBoardingPassengerCannotTimeout(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 1;
+    passenger.waitElapsed = 0.99;
     passenger.patience = 0.01;
 
     assert(model.boardAtCurrentFloor() === 1, 'the passenger should start boarding');
@@ -279,6 +301,7 @@ function testPatienceWarningAndFailureRule(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 4;
+    passenger.waitElapsed = 2.9;
     passenger.patience = 1.1;
 
     model.update(0.15);
@@ -300,6 +323,7 @@ function testPatienceWarningAndFailureRule(): void {
 function testRestartClearsFailedRun(): void {
     const model = createRunningModel();
     const passenger = model.createPassenger(1, 2);
+    passenger.waitElapsed = 0.99;
     passenger.patience = 0.01;
     passenger.maxPatience = 1;
     model.economy.coins = 7;
@@ -402,6 +426,7 @@ function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
 
 testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
+testPassengerWaitTimingMatchesFortySecondRule();
 testAutomaticBoardingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
 testBoardingPassengerCannotTimeout();

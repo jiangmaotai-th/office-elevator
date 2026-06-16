@@ -16,7 +16,9 @@ import {
 const MIN_FLOORS = 3;
 const BOARDING_INTERVAL = 0.22;
 const UNLOADING_INTERVAL = 0.28;
-const PATIENCE_WARNING_RATIO = 0.25;
+const PASSENGER_WAIT_SECONDS = 40;
+const PATIENCE_RING_RATIO = 0.5;
+const PATIENCE_WARNING_RATIO = 0.75;
 const WARNING_SOUND_INTERVAL = 0.8;
 const ELEVATOR_COUNT = 2;
 const DELIVERY_SCORE_BASE = 10;
@@ -117,11 +119,12 @@ export class GameModel {
     }
 
     createPassenger(originFloor: number, destinationFloor: number): PassengerModel {
-        const maxPatience = 20 + this.upgrades.patienceLevel * 4 + Math.random() * 12;
+        const maxPatience = PASSENGER_WAIT_SECONDS + this.upgrades.patienceLevel * 4;
         const passenger: PassengerModel = {
             id: this.nextPassengerId++,
             originFloor,
             destinationFloor,
+            waitElapsed: 0,
             patience: maxPatience,
             maxPatience,
             state: PassengerState.Waiting,
@@ -141,9 +144,17 @@ export class GameModel {
     get warningFloors(): number[] {
         return [...new Set(
             this.waitingPassengers
-                .filter((passenger) => passenger.patience / passenger.maxPatience <= PATIENCE_WARNING_RATIO)
+                .filter((passenger) => passenger.waitElapsed / passenger.maxPatience >= PATIENCE_WARNING_RATIO)
                 .map((passenger) => passenger.originFloor),
         )];
+    }
+
+    getPassengerWaitProgress(passenger: PassengerModel): number {
+        return Math.max(0, Math.min(1, passenger.waitElapsed / passenger.maxPatience));
+    }
+
+    shouldShowPassengerTimer(passenger: PassengerModel): boolean {
+        return passenger.waitElapsed / passenger.maxPatience >= PATIENCE_RING_RATIO;
     }
 
     get elevatorOccupancy(): number {
@@ -319,8 +330,9 @@ export class GameModel {
 
     private updatePatience(deltaTime: number): void {
         for (const passenger of this.waitingPassengers) {
-            passenger.patience -= deltaTime;
-            if (passenger.patience > 0) {
+            passenger.waitElapsed += deltaTime;
+            passenger.patience = Math.max(0, passenger.maxPatience - passenger.waitElapsed);
+            if (passenger.waitElapsed < passenger.maxPatience) {
                 continue;
             }
             passenger.patience = 0;

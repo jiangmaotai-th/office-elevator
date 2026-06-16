@@ -17,6 +17,7 @@ export interface PassengerModel {
     id: number;
     originFloor: number;
     destinationFloor: number;
+    waitElapsed: number;
     patience: number;
     maxPatience: number;
     state: PassengerState;

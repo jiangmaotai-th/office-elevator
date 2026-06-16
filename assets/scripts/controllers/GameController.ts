@@ -2,6 +2,8 @@ import { EventMouse, EventTouch, input, Input } from 'cc';
 import { GameManager } from '../managers/GameManager';
 import { GameView } from '../views/GameView';
 
+const MAX_WAITING_PASSENGERS = 18;
+
 export class GameController {
     private spawnTimer = 0;
     private activeElevatorIndex = 0;
@@ -260,21 +262,45 @@ export class GameController {
         if (this.manager.model.waitingPassengers.length > 0) {
             return;
         }
-        this.manager.model.createPassenger(0, 2);
-        this.manager.model.createPassenger(1, 0);
-        this.manager.model.createPassenger(2, 1);
+        this.createPassengerBatch(0, 4);
+        this.createPassengerBatch(1, 1);
+        this.createPassengerBatch(2, 1);
     }
 
     private spawnPassenger(): void {
-        const floorCount = this.manager.model.progress.unlockedFloors;
-        if (this.manager.model.waitingPassengers.length >= 14) {
+        const waitingCount = this.manager.model.waitingPassengers.length;
+        if (waitingCount >= MAX_WAITING_PASSENGERS) {
             return;
         }
-        const origin = Math.floor(Math.random() * floorCount);
-        let destination = Math.floor(Math.random() * floorCount);
-        while (destination === origin) {
-            destination = Math.floor(Math.random() * floorCount);
+        const origin = this.pickPassengerOrigin();
+        const room = MAX_WAITING_PASSENGERS - waitingCount;
+        const requestedCount = origin === 0 ? 2 + Math.floor(Math.random() * 3) : 1;
+        this.createPassengerBatch(origin, Math.min(room, requestedCount));
+    }
+
+    private createPassengerBatch(origin: number, count: number): number {
+        const floorCount = this.manager.model.progress.unlockedFloors;
+        let created = 0;
+        for (let index = 0; index < count; index += 1) {
+            let destination = Math.floor(Math.random() * floorCount);
+            while (destination === origin) {
+                destination = Math.floor(Math.random() * floorCount);
+            }
+            this.manager.model.createPassenger(origin, destination);
+            created += 1;
         }
-        this.manager.model.createPassenger(origin, destination);
+        this.view.showQueueIncrease(origin, created);
+        return created;
+    }
+
+    private pickPassengerOrigin(): number {
+        const floorCount = this.manager.model.progress.unlockedFloors;
+        if (floorCount <= 1) {
+            return 0;
+        }
+        if (Math.random() < 0.55) {
+            return 0;
+        }
+        return 1 + Math.floor(Math.random() * (floorCount - 1));
     }
 }
