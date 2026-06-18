@@ -9,6 +9,7 @@ import {
     SpriteFrame,
     UITransform,
     Vec3,
+    view,
 } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameModel } from '../models/GameModel';
@@ -60,9 +61,9 @@ const FLOOR_COLORS = [
 const OFFICE_WALL = new Color(48, 50, 53, 245);
 const OFFICE_WALL_ALT = new Color(57, 59, 62, 245);
 const TOWER_BOTTOM = -425;
-const TOWER_TOP = 355;
-const FLOOR_GAP = 180;
-const FLOOR_BASE_Y = -285;
+const TOWER_TOP = 430;
+const FLOOR_GAP = 138;
+const FLOOR_BASE_Y = -350;
 const MIN_VISIBLE_FLOORS = 30;
 
 export interface GameHitAreas {
@@ -72,6 +73,8 @@ export interface GameHitAreas {
     isStartButton(position: Vec3): boolean;
     isMenuButton(position: Vec3): boolean;
     isRestartButton(position: Vec3): boolean;
+    isNewGameButton(position: Vec3): boolean;
+    levelAt(position: Vec3, model: GameModel): string | null;
     upgradeAt(position: Vec3): UpgradeType | null;
 }
 
@@ -122,7 +125,8 @@ export class GameView implements GameHitAreas {
     }
 
     toLocalPosition(uiX: number, uiY: number): Vec3 {
-        return new Vec3(uiX - 360, uiY - 640, 0);
+        const visibleSize = view.getVisibleSize();
+        return new Vec3(uiX - visibleSize.width * 0.5, uiY - visibleSize.height * 0.5, 0);
     }
 
     render(model: GameModel): void {
@@ -134,6 +138,7 @@ export class GameView implements GameHitAreas {
         this.drawQueueIncreaseFeedbacks();
         this.drawDeliveryFeedback(model);
         this.drawTowerViewportMasks();
+        this.drawOffscreenPassengerArrows(model);
         this.drawHeader(model);
         this.drawBuildButton(model);
         if (this.menuOpen) {
@@ -142,6 +147,7 @@ export class GameView implements GameHitAreas {
             this.setMenuLabelsActive(false);
         }
         if (!model.progress.started && !model.progress.failed && !model.progress.completed) {
+            this.drawLevelSelect(model);
             this.drawStartPrompt(model);
         } else {
             this.labels.start.node.active = false;
@@ -156,7 +162,9 @@ export class GameView implements GameHitAreas {
             this.drawFailure(model);
         } else {
             this.labels.failure.node.active = false;
-            this.labels.restart.node.active = false;
+            if (!model.progress.completed) {
+                this.labels.restart.node.active = false;
+            }
         }
     }
 
@@ -200,6 +208,20 @@ export class GameView implements GameHitAreas {
         return position.x > -340 && position.x < 340 && position.y > TOWER_BOTTOM && position.y < TOWER_TOP;
     }
 
+    levelAt(position: Vec3, model: GameModel): string | null {
+        if (model.progress.started || model.progress.completed || model.progress.failed) {
+            return null;
+        }
+        const levels = model.levelConfigs.slice(0, 3);
+        for (let index = 0; index < levels.length; index += 1) {
+            const y = 255 - index * 82;
+            if (position.x > -310 && position.x < 310 && position.y > y - 32 && position.y < y + 32) {
+                return levels[index].id;
+            }
+        }
+        return null;
+    }
+
     scrollTowerBy(deltaY: number, floorCount: number): void {
         this.towerScrollOffset = this.clampTowerScroll(this.towerScrollOffset + deltaY, floorCount);
     }
@@ -226,6 +248,10 @@ export class GameView implements GameHitAreas {
 
     isRestartButton(position: Vec3): boolean {
         return position.x > -125 && position.x < 125 && position.y > -145 && position.y < -65;
+    }
+
+    isNewGameButton(position: Vec3): boolean {
+        return this.menuOpen && position.x > -125 && position.x < 125 && position.y > -105 && position.y < -35;
     }
 
     upgradeAt(position: Vec3): UpgradeType | null {
@@ -267,15 +293,18 @@ export class GameView implements GameHitAreas {
     }
 
     private createLabels(): void {
-        this.labels.time = this.createLabel('Time', 64, 180, new Vec3(-310, 555));
-        this.labels.day = this.createLabel('Day', 22, 260, new Vec3(-310, 485));
-        this.labels.stats = this.createLabel('Stats', 22, 290, new Vec3(80, 485));
+        this.labels.time = this.createLabel('Time', 52, 150, new Vec3(-310, 570));
+        this.labels.day = this.createLabel('Day', 19, 260, new Vec3(-310, 508));
+        this.labels.stats = this.createLabel('Stats', 20, 290, new Vec3(80, 508));
         this.labels.floorHint = this.createLabel('Hint', 18, 260, new Vec3(-250, -390));
+        this.labels.scoreHud = this.createLabel('ScoreHud', 24, 170, new Vec3(-190, -503));
+        this.labels.scoreBonus = this.createLabel('ScoreBonus', 24, 150, new Vec3(-30, -503));
+        this.labels.scoreBonus.node.active = false;
         this.labels.build = this.createLabel('Build', 20, 90, new Vec3(-312, -505));
         this.labels.build.node.getComponent(UITransform)?.setContentSize(92, 96);
         this.labels.build.horizontalAlign = Label.HorizontalAlign.CENTER;
-        this.labels.menu = this.createLabel('Menu', 22, 96, new Vec3(240, 555));
-        this.labels.notice = this.createLabel('Notice', 24, 610, new Vec3(-305, 390));
+        this.labels.menu = this.createLabel('Menu', 20, 96, new Vec3(240, 570));
+        this.labels.notice = this.createLabel('Notice', 20, 610, new Vec3(-305, 455));
         this.labels.complete = this.createLabel('Complete', 34, 540, new Vec3(-270, 30));
         this.labels.complete.node.active = false;
         this.labels.failure = this.createLabel('Failure', 34, 540, new Vec3(-270, 30));
@@ -411,7 +440,7 @@ export class GameView implements GameHitAreas {
         }
 
         const elevatorXs = [s1Left, s2Left];
-        model.elevators.forEach((elevator, index) => {
+        model.elevators.slice(0, model.activeElevatorCount).forEach((elevator, index) => {
             const elevatorY = bottomY + (elevator.position - model.minFloor) * floorGap;
             if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
                 this.drawCabin(model, elevator, index, elevatorXs[index], elevatorY, shaftWidth);
@@ -435,6 +464,60 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.line(-340, TOWER_BOTTOM, 340, TOWER_BOTTOM, new Color(120, 122, 126, 180), 2);
         this.line(-340, TOWER_TOP, 340, TOWER_TOP, new Color(120, 122, 126, 180), 2);
+    }
+
+    private drawOffscreenPassengerArrows(model: GameModel): void {
+        if (!model.progress.started || model.progress.completed || model.progress.failed) {
+            return;
+        }
+        let hasAbove = false;
+        let hasBelow = false;
+        const waitingFloors = new Set(model.waitingPassengers.map((passenger) => passenger.originFloor));
+        waitingFloors.forEach((floor) => {
+            const y = this.floorYs.get(floor);
+            if (y === undefined) {
+                return;
+            }
+            if (y > TOWER_TOP) {
+                hasAbove = true;
+            } else if (y < TOWER_BOTTOM) {
+                hasBelow = true;
+            }
+        });
+        const pulse = (Math.sin(model.progress.elapsedSeconds * Math.PI * 4) + 1) * 0.5;
+        const color = new Color(247, 243, 237, 150 + Math.round(pulse * 105));
+        if (hasAbove) {
+            this.drawOffscreenArrow(0, TOWER_TOP - 32, true, color);
+        }
+        if (hasBelow) {
+            this.drawOffscreenArrow(0, TOWER_BOTTOM + 32, false, color);
+        }
+    }
+
+    private drawOffscreenArrow(x: number, y: number, up: boolean, color: Color): void {
+        this.graphics.fillColor = new Color(20, 21, 24, color.a);
+        this.graphics.roundRect(x - 54, y - 23, 108, 46, 23);
+        this.graphics.fill();
+        this.graphics.fillColor = color;
+        if (up) {
+            this.graphics.moveTo(x, y + 15);
+            this.graphics.lineTo(x - 20, y - 9);
+            this.graphics.lineTo(x - 8, y - 9);
+            this.graphics.lineTo(x - 8, y - 17);
+            this.graphics.lineTo(x + 8, y - 17);
+            this.graphics.lineTo(x + 8, y - 9);
+            this.graphics.lineTo(x + 20, y - 9);
+        } else {
+            this.graphics.moveTo(x, y - 15);
+            this.graphics.lineTo(x - 20, y + 9);
+            this.graphics.lineTo(x - 8, y + 9);
+            this.graphics.lineTo(x - 8, y + 17);
+            this.graphics.lineTo(x + 8, y + 17);
+            this.graphics.lineTo(x + 8, y + 9);
+            this.graphics.lineTo(x + 20, y + 9);
+        }
+        this.graphics.close();
+        this.graphics.fill();
     }
 
     private drawFloorMarker(model: GameModel, floor: number, y: number, unlocked: boolean): void {
@@ -504,6 +587,7 @@ export class GameView implements GameHitAreas {
             // The oldest passenger is closest to the elevator on the right.
             const x = 75 - index * 40;
             this.drawPassenger(
+                model,
                 passenger,
                 this.getPassengerX(model, passenger, x),
                 y,
@@ -524,13 +608,14 @@ export class GameView implements GameHitAreas {
     }
 
     private drawPassenger(
+        model: GameModel,
         passenger: PassengerModel,
         x: number,
         y: number,
         waitProgress: number,
         showTimer: boolean,
     ): void {
-        const clothingColor = this.floorColorByFloor(passenger.destinationFloor);
+        const clothingColor = this.passengerColor(model, passenger);
         const female = passenger.id % 2 === 0;
         this.graphics.fillColor = new Color(238, 199, 165, 255);
         this.graphics.circle(x, y + 13, 9);
@@ -614,7 +699,7 @@ export class GameView implements GameHitAreas {
                 const row = Math.floor(index / 3);
                 const iconX = x + 17 + column * 22;
                 const iconY = y - 7 - row * 23;
-                this.graphics.fillColor = this.floorColor(model, passenger.destinationFloor);
+                this.graphics.fillColor = this.passengerColor(model, passenger);
                 this.graphics.roundRect(iconX, iconY, 14, 18, 3);
                 this.graphics.fill();
                 if (model.shouldShowPassengerTimer(passenger)) {
@@ -642,6 +727,9 @@ export class GameView implements GameHitAreas {
             if (label) {
                 label.node.active = false;
             }
+            if (this.labels.deliveryMultiplier) {
+                this.labels.deliveryMultiplier.node.active = false;
+            }
             return;
         }
         const floorY = this.floorYs.get(feedback.floor);
@@ -655,10 +743,13 @@ export class GameView implements GameHitAreas {
             if (label) {
                 label.node.active = false;
             }
+            if (this.labels.deliveryMultiplier) {
+                this.labels.deliveryMultiplier.node.active = false;
+            }
             return;
         }
         const progress = Math.min(1, (Date.now() - feedback.startedAt) / 650);
-        this.drawPassenger(passenger, 205 - progress * 62, floorY, 1, false);
+        this.drawPassenger(model, passenger, 205 - progress * 62, floorY, 1, false);
         this.graphics.fillColor = new Color(22, 23, 25, 230);
         this.graphics.roundRect(95, floorY + 29, 94, 34, 6);
         this.graphics.fill();
@@ -691,30 +782,90 @@ export class GameView implements GameHitAreas {
         }
     }
 
+    private drawScoreBonusFeedback(): void {
+        const label = this.labels.scoreBonus;
+        const feedback = this.deliveryFeedback;
+        if (!label || !feedback) {
+            if (label) {
+                label.node.active = false;
+            }
+            return;
+        }
+        const elapsed = Date.now() - feedback.startedAt;
+        if (elapsed > 1000) {
+            label.node.active = false;
+            return;
+        }
+        const progress = Math.min(1, elapsed / 1000);
+        label.node.active = true;
+        label.color = feedback.multiplier > 1 ? GOLD : PAPER;
+        label.node.setPosition(new Vec3(-30, -503 + progress * 22));
+        label.string = feedback.multiplier > 1
+            ? `${feedback.multiplier}X +${feedback.scoreGain}`
+            : `+${feedback.scoreGain}`;
+    }
+
     private drawBuildButton(model: GameModel): void {
         this.graphics.fillColor = INK;
         this.graphics.rect(-320, -540, 100, 110);
         this.graphics.fill();
         this.labels.build.color = PAPER;
-        this.labels.build.string = `增层\n${model.floorExtensionCost}`;
-        const occupancy = model.elevators.reduce((sum, _elevator, index) => {
+        this.labels.build.string = `关卡\n${model.currentLevelConfig.id}`;
+        const activeElevators = model.elevators.slice(0, model.activeElevatorCount);
+        const occupancy = activeElevators.reduce((sum, _elevator, index) => {
             return sum + model.elevatorOccupancyAt(index);
         }, 0);
-        const capacity = model.elevators.reduce((sum, elevator) => sum + elevator.capacity, 0);
-        this.labels.floorHint.string = `分数 ${model.economy.score}    ${model.economy.multiplier}X    金币 ${model.economy.coins}    载客 ${occupancy}/${capacity}`;
+        const capacity = activeElevators.reduce((sum, elevator) => sum + elevator.capacity, 0);
+        this.labels.scoreHud.color = PAPER;
+        this.labels.scoreHud.string = `分数 ${model.economy.score}`;
+        this.drawScoreBonusFeedback();
+        this.labels.floorHint.string = `金币 ${model.economy.coins}    载客 ${occupancy}/${capacity}`;
+    }
+
+    private drawLevelSelect(model: GameModel): void {
+        this.graphics.fillColor = new Color(24, 26, 29, 232);
+        this.graphics.roundRect(-330, 58, 660, 335, 10);
+        this.graphics.fill();
+        this.strokeRect(-330, 58, 660, 335, new Color(247, 242, 234, 170), 2);
+        this.drawText('level-select-title', '选择基础关卡', -300, 360, 28, PAPER, 240);
+        this.drawText('level-select-desc', '先用 1-1 到 1-3 把核心手感打稳，后续章节再逐步解锁双电梯和换乘。', -300, 322, 18, new Color(225, 220, 211, 230), 600);
+        const levels = model.levelConfigs.slice(0, 3);
+        levels.forEach((level, index) => {
+            const y = 255 - index * 82;
+            const selected = level.id === model.currentLevelConfig.id;
+            this.graphics.fillColor = selected
+                ? new Color(247, 242, 234, 238)
+                : new Color(247, 242, 234, 185);
+            this.graphics.roundRect(-310, y - 32, 620, 64, 7);
+            this.graphics.fill();
+            this.strokeRect(-310, y - 32, 620, 64, selected ? GOLD : new Color(110, 108, 102, 210), selected ? 3 : 2);
+            this.drawText(`level-card-id-${level.id}`, level.id, -286, y + 12, 21, selected ? INK : MUTED, 62);
+            this.drawText(`level-card-title-${level.id}`, level.title.replace(/^1-\d\s*/, ''), -218, y + 13, 22, INK, 220);
+            this.drawText(`level-card-desc-${level.id}`, level.description, -218, y - 13, 15, MUTED, 370);
+            const stars = model.getLevelStars(level.id);
+            this.drawText(
+                `level-card-stars-${level.id}`,
+                stars > 0 ? '★'.repeat(stars) : '未通关',
+                210,
+                y,
+                19,
+                stars > 0 ? GOLD : MUTED,
+                90,
+            );
+        });
     }
 
     private drawStartPrompt(model: GameModel): void {
         this.graphics.fillColor = new Color(247, 242, 234, 218);
-        this.graphics.roundRect(-300, -120, 600, 220, 8);
+        this.graphics.roundRect(-300, -335, 600, 135, 8);
         this.graphics.fill();
-        this.strokeRect(-300, -120, 600, 220, INK, 2);
-        this.drawText('start-title', '写字楼电梯调度', -230, 45, 34, INK, 460);
+        this.strokeRect(-300, -335, 600, 135, INK, 2);
+        this.drawText('start-title', model.currentLevelConfig.title, -245, -230, 28, INK, 490);
         this.drawText(
             'start-desc',
-            `选择 S1 或 S2 后，连续点击楼层会按顺序停站\n本局目标 ${model.progress.targetDeliveries} 人 · 最高分 ${model.economy.bestScore}`,
-            -230,
-            -20,
+            `目标：送达 ${model.progress.targetDeliveries} 人 · 电梯 ${model.activeElevatorCount} 台 · 最高分 ${model.economy.bestScore}`,
+            -245,
+            -285,
             20,
             MUTED,
             480,
@@ -755,16 +906,34 @@ export class GameView implements GameHitAreas {
     }
 
     private drawCompletion(model: GameModel): void {
+        this.setUpgradeLabelsActive(false);
         this.graphics.fillColor = new Color(247, 242, 234, 235);
         this.graphics.rect(-320, -180, 640, 360);
         this.graphics.fill();
         this.strokeRect(-320, -180, 640, 360, INK, 3);
+        const stars = model.getLevelStars(model.currentLevelConfig.id);
         this.labels.complete.node.active = true;
-        this.labels.complete.node.setPosition(-275, 105);
-        this.labels.complete.string = `运营升级 · 分数 ${model.economy.score}`;
-        this.drawUpgradeCard(-290, UpgradeType.Capacity, '扩容', `每部容量 +1\n当前 ${model.elevator.capacity}`);
-        this.drawUpgradeCard(-95, UpgradeType.Speed, '提速', `运行速度 +15%\n等级 ${model.upgrades.speedLevel}`);
-        this.drawUpgradeCard(100, UpgradeType.Patience, '安抚', `耐心上限 +4秒\n等级 ${model.upgrades.patienceLevel}`);
+        this.labels.complete.node.setPosition(-255, 95);
+        this.labels.complete.string = `关卡完成 · ${'★'.repeat(Math.max(1, stars))}`;
+        this.drawText('settlement-level', model.currentLevelConfig.title, -235, 35, 26, INK, 470);
+        this.drawText(
+            'settlement-score',
+            `分数 ${model.economy.score} · 送达 ${model.economy.delivered} 人 · 流失 ${model.economy.lost} 人`,
+            -235,
+            -18,
+            21,
+            MUTED,
+            470,
+        );
+        this.graphics.fillColor = INK;
+        this.graphics.roundRect(-125, -145, 250, 80, 5);
+        this.graphics.fill();
+        this.labels.restart.node.active = true;
+        this.labels.restart.color = PAPER;
+        const levelIds = model.levelConfigs.slice(0, 3).map((level) => level.id);
+        const hasNextLevel = levelIds.indexOf(model.currentLevelConfig.id) >= 0
+            && levelIds.indexOf(model.currentLevelConfig.id) < levelIds.length - 1;
+        this.labels.restart.string = hasNextLevel ? '下一关' : '返回选关';
     }
 
     private drawFailure(model: GameModel): void {
@@ -781,7 +950,7 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.labels.restart.node.active = true;
         this.labels.restart.color = INK;
-        this.labels.restart.string = '重新开始';
+        this.labels.restart.string = '全新开始';
     }
 
     private drawUpgradeCard(x: number, key: UpgradeType, title: string, description: string): void {
@@ -808,11 +977,15 @@ export class GameView implements GameHitAreas {
         this.drawText('menu-title', '运营菜单', -245, 105, 38, INK);
         this.drawText('menu-progress', `第 ${model.progress.day} 天 · 等级 ${model.progress.level}`, -245, 40, 24, MUTED);
         this.drawText('menu-save', '进度已自动保存', -245, -25, 24, INK);
-        this.drawText('menu-close', '再次点击右上角菜单继续', -245, -105, 22, MUTED);
+        this.graphics.fillColor = INK;
+        this.graphics.roundRect(-125, -105, 250, 70, 5);
+        this.graphics.fill();
+        this.drawText('menu-new-game', '全新开始', -55, -70, 24, PAPER, 120);
+        this.drawText('menu-close', '再次点击右上角菜单继续', -245, -135, 20, MUTED);
     }
 
     private setMenuLabelsActive(active: boolean): void {
-        ['menu-title', 'menu-progress', 'menu-save', 'menu-close'].forEach((key) => {
+        ['menu-title', 'menu-progress', 'menu-save', 'menu-new-game', 'menu-close'].forEach((key) => {
             if (this.labels[key]) {
                 this.labels[key].node.active = active;
             }
@@ -838,6 +1011,8 @@ export class GameView implements GameHitAreas {
                 || key.startsWith('queue-increase-')
                 || key.startsWith('rush-warning-')
                 || key.startsWith('start-')
+                || key.startsWith('level-')
+                || key.startsWith('settlement-')
                 || key === 'deliveryCount'
                 || key === 'deliveryMultiplier'
             ) {
@@ -847,12 +1022,12 @@ export class GameView implements GameHitAreas {
     }
 
     private floorColor(model: GameModel, floor: number): Color {
-        const index = model.getRenderableFloors().indexOf(floor);
+        const index = model.getFloorColorIndex(floor);
         return FLOOR_COLORS[Math.max(0, index) % FLOOR_COLORS.length];
     }
 
-    private floorColorByFloor(floor: number): Color {
-        const index = floor + 2;
+    private passengerColor(model: GameModel, passenger: PassengerModel): Color {
+        const index = passenger.destinationColorIndex ?? model.getFloorColorIndex(passenger.destinationFloor);
         return FLOOR_COLORS[Math.max(0, index) % FLOOR_COLORS.length];
     }
 

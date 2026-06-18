@@ -2,7 +2,6 @@ import { EventMouse, EventTouch, input, Input } from 'cc';
 import { GameManager } from '../managers/GameManager';
 import { GameView } from '../views/GameView';
 
-const MAX_WAITING_PASSENGERS = 48;
 const PASSENGER_APPEAR_INTERVAL = 0.18;
 
 interface PendingPassengerSpawn {
@@ -170,36 +169,48 @@ export class GameController {
 
         if (this.manager.model.progress.failed) {
             if (this.view.isRestartButton(position)) {
-                this.manager.model.restartGame();
-                this.passengerAppearTimer = 0;
-                this.pendingPassengerSpawns.length = 0;
-                this.view.resetTowerScroll();
-                this.view.setInteractionMessage('准备重新开始，点击开始运营');
-                this.manager.saveNow();
+                this.startNewGame();
             }
             return;
         }
         if (this.manager.model.progress.completed) {
-            const upgrade = this.view.upgradeAt(position);
-            if (upgrade) {
-                this.manager.model.chooseUpgrade(upgrade);
+            if (this.view.isRestartButton(position)) {
+                const levels = this.manager.model.levelConfigs.slice(0, 3);
+                const currentLevelId = this.manager.model.currentLevelConfig.id;
+                const currentIndex = levels.findIndex((level) => level.id === currentLevelId);
+                const nextLevel = currentIndex >= 0 ? levels[currentIndex + 1] : null;
+                this.manager.model.loadLevel(nextLevel?.id ?? currentLevelId);
+                this.activeElevatorIndex = 0;
+                this.view.setActiveElevator(0);
+                this.view.resetTowerScroll();
                 this.passengerAppearTimer = 0;
                 this.pendingPassengerSpawns.length = 0;
                 this.manager.saveNow();
-                this.view.setInteractionMessage('升级完成，点击开始下一天');
+                this.view.setInteractionMessage(nextLevel ? '已进入下一关，点击开始运营' : '已返回选关，点击关卡或开始运营');
             }
             return;
         }
         if (!this.manager.model.progress.started) {
+            const selectedLevel = this.view.levelAt(position, this.manager.model);
+            if (selectedLevel) {
+                this.manager.model.loadLevel(selectedLevel);
+                this.activeElevatorIndex = 0;
+                this.view.setActiveElevator(0);
+                this.view.resetTowerScroll();
+                this.pendingPassengerSpawns.length = 0;
+                this.passengerAppearTimer = 0;
+                this.view.setInteractionMessage('关卡已切换，点击开始运营');
+                this.manager.saveNow();
+                return;
+            }
             if (this.view.isStartButton(position)) {
                 this.manager.model.startRun();
                 this.passengerAppearTimer = 0;
                 this.pendingPassengerSpawns.length = 0;
-                this.view.setInteractionMessage('运营开始，观察高峰预警，提前布置 S1/S2');
+                this.view.setInteractionMessage('运营开始，点击楼层给当前电梯追加停站指令');
                 this.manager.saveNow();
             } else if (this.view.isBuildButton(position)) {
-                const built = this.manager.model.extendFloor();
-                this.view.setInteractionMessage(built ? '新楼层已解锁，可上下拖动浏览' : '金币不足');
+                this.view.setInteractionMessage('当前是关卡制，楼层由关卡配置控制');
             } else {
                 this.view.setInteractionMessage('点击开始运营后，乘客才会出现和倒计时');
             }
@@ -212,11 +223,24 @@ export class GameController {
             return;
         }
         if (this.view.isMenuOpen) {
+            if (this.view.isNewGameButton(position)) {
+                this.startNewGame();
+                this.view.toggleMenu();
+            }
             return;
         }
+        const model = this.manager.model;
         const cabinIndex = this.view.cabinAt(position);
-        if (cabinIndex !== null) {
-            const model = this.manager.model;
+        const floor = this.view.floorAt(position);
+        const cabinElevator = cabinIndex === null ? null : model.elevators[cabinIndex];
+        const isExplicitCabinTap = cabinIndex !== null
+            && cabinElevator !== undefined
+            && floor === cabinElevator.currentFloor;
+        if (cabinIndex !== null && isExplicitCabinTap) {
+            if (cabinIndex >= this.manager.model.activeElevatorCount) {
+                this.view.setInteractionMessage('这一关还没有解锁第二台电梯');
+                return;
+            }
             this.activeElevatorIndex = cabinIndex;
             this.view.setActiveElevator(cabinIndex);
             const elevator = model.elevators[cabinIndex];
@@ -234,14 +258,15 @@ export class GameController {
             return;
         }
         if (this.view.isBuildButton(position)) {
-            const built = this.manager.model.extendFloor();
-            this.view.setInteractionMessage(built ? '新楼层已解锁，可上下拖动浏览' : '金币不足');
+            this.view.setInteractionMessage('当前是关卡制，楼层由关卡配置控制');
             return;
         }
-        const floor = this.view.floorAt(position);
         if (floor !== null) {
-            const model = this.manager.model;
-            const elevatorIndex = this.activeElevatorIndex;
+            const elevatorIndex = this.activeElevatorIndex >= model.activeElevatorCount ? 0 : this.activeElevatorIndex;
+            if (elevatorIndex !== this.activeElevatorIndex) {
+                this.activeElevatorIndex = elevatorIndex;
+                this.view.setActiveElevator(elevatorIndex);
+            }
             const elevator = model.elevators[elevatorIndex];
             const queued = model.queueFloorForElevator(floor, elevatorIndex);
             if (!queued && elevator.targetFloor === null && floor === elevator.currentFloor) {
@@ -269,10 +294,11 @@ export class GameController {
             return;
         }
         const waitingCount = this.manager.model.waitingPassengers.length + this.pendingPassengerSpawns.length;
-        if (waitingCount >= MAX_WAITING_PASSENGERS) {
+        const maxWaitingPassengers = this.manager.model.currentWaitingPassengerLimit;
+        if (waitingCount >= maxWaitingPassengers) {
             return;
         }
-        const room = MAX_WAITING_PASSENGERS - waitingCount;
+        const room = maxWaitingPassengers - waitingCount;
         const accepted = requests.slice(0, room);
         const countsByOrigin = new Map<number, number>();
         accepted.forEach((request) => {
@@ -285,6 +311,14 @@ export class GameController {
         for (const [origin, count] of countsByOrigin.entries()) {
             this.view.showQueueIncrease(origin, count);
         }
+    }
+
+    private startNewGame(): void {
+        this.manager.startNewGame();
+        this.passengerAppearTimer = 0;
+        this.pendingPassengerSpawns.length = 0;
+        this.view.resetTowerScroll();
+        this.view.setInteractionMessage('已全新开始，点击开始运营');
     }
 
     private updatePendingPassengerSpawns(deltaTime: number): void {

@@ -37,4 +37,10 @@ export class GameManager {
     saveNow(): void {
         this.storage.save(this.model.snapshot());
     }
+
+    startNewGame(): void {
+        this.model.startNewGame();
+        this.storage.clear();
+        this.saveTimer = 0;
+    }
 }

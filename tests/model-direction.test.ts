@@ -7,8 +7,9 @@ function assert(condition: boolean, message: string): void {
     }
 }
 
-function createRunningModel(): GameModel {
+function createRunningModel(levelId = '1-2'): GameModel {
     const model = new GameModel();
+    model.loadLevel(levelId);
     model.startRun();
     return model;
 }
@@ -25,6 +26,7 @@ function runUntilIdle(model: GameModel, maxSeconds = 20): void {
 
 function testRunWaitsForExplicitStart(): void {
     const model = new GameModel();
+    model.loadLevel('1-2');
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 1;
     passenger.waitElapsed = 0.99;
@@ -112,7 +114,7 @@ function testPassengerWaitTimingMatchesFortySecondRule(): void {
     assert(model.progress.failed, 'the run should fail when the passenger reaches 40 seconds');
 }
 
-function testAutomaticBoardingMatchesArrivalDirection(): void {
+function testCallingPassengerFloorDoesNotAutoBoardWithoutOnwardStop(): void {
     const model = createRunningModel();
     const sameDirection = model.createPassenger(1, 2);
     const oppositeDirection = model.createPassenger(1, 0);
@@ -121,15 +123,64 @@ function testAutomaticBoardingMatchesArrivalDirection(): void {
     assert(model.elevator.direction === ElevatorDirection.Up, 'elevator should travel upward');
     runUntilIdle(model);
 
-    assert(sameDirection.state === PassengerState.Boarding, 'up passenger should start boarding automatically');
+    assert(sameDirection.state === PassengerState.Waiting, 'calling the passenger floor alone should not auto-board');
+    assert(oppositeDirection.state === PassengerState.Waiting, 'opposite-direction passenger should also wait');
+    assert(model.boardAtCurrentFloor() === 2, 'manual cabin tap should board waiting passengers');
+}
+
+function testAutomaticBoardingMatchesOnwardDirection(): void {
+    const model = createRunningModel();
+    const sameDirection = model.createPassenger(1, 2);
+    const oppositeDirection = model.createPassenger(1, 0);
+
+    model.queueFloor(1);
+    model.queueFloor(2);
+    assert(model.elevator.direction === ElevatorDirection.Up, 'elevator should travel upward');
+    for (let elapsed = 0; elapsed < 10; elapsed += 0.05) {
+        model.update(0.05);
+        if (sameDirection.state === PassengerState.Boarding) {
+            break;
+        }
+    }
+
+    assert(sameDirection.state === PassengerState.Boarding, 'up passenger should auto-board only when the cabin continues upward');
     assert(oppositeDirection.state === PassengerState.Waiting, 'down passenger must wait for a down-going cabin');
     assert(model.elevator.currentFloor === 1, 'automatic boarding should leave the elevator at the arrival floor');
     assert(model.elevator.targetFloor === null, 'automatic boarding must wait for the next player floor click');
-    assert(model.elevator.queue.length === 0, 'automatic boarding must not enqueue passenger destinations');
+    assert(model.elevator.queue[0] === 2, 'the onward stop should remain queued while boarding completes');
+}
+
+function testAutomaticBoardingAfterUnloadingMatchesArrivalDirection(): void {
+    const model = createRunningModel();
+    const rider = model.createPassenger(0, 1);
+    rider.state = PassengerState.Riding;
+    rider.patience = rider.maxPatience;
+    model.elevator.passengers = [rider.id];
+    const sameDirection = model.createPassenger(1, 2);
+    const oppositeDirection = model.createPassenger(1, 0);
+
+    model.queueFloor(1);
+    model.queueFloor(2);
+    for (let elapsed = 0; elapsed < 10; elapsed += 0.05) {
+        model.update(0.05);
+        if (model.getPassenger(rider.id)?.state === PassengerState.Exiting) {
+            break;
+        }
+    }
+    assert(model.getPassenger(rider.id)?.state === PassengerState.Exiting, 'rider should unload before new passengers board');
+
+    model.update(0.29);
+    assert(model.getPassenger(rider.id)?.state === PassengerState.Delivered, 'rider should finish unloading first');
+    assert(
+        model.getPassenger(sameDirection.id)?.state !== PassengerState.Waiting,
+        'same-direction passenger should board after unloading',
+    );
+    assert(model.getPassenger(oppositeDirection.id)?.state === PassengerState.Waiting, 'opposite-direction passenger should keep waiting');
 }
 
 function testCapacityKeepsRemainingPassengersInFifoQueue(): void {
     const model = createRunningModel();
+    assert(model.elevator.capacity === 5, 'a single elevator should start with a max capacity of five passengers');
     model.elevator.capacity = 2;
     model.elevator2.currentFloor = 1;
     model.elevator2.position = 1;
@@ -375,6 +426,45 @@ function testRestartClearsFailedRun(): void {
     assert(model.economy.coins === 7, 'restart should preserve the current economy');
 }
 
+function testStartNewGameResetsProgressAndEconomy(): void {
+    const model = createRunningModel();
+    model.economy.coins = 99;
+    model.economy.stars = 5;
+    model.economy.bestScore = 300;
+    model.progress.day = 4;
+    model.progress.level = 4;
+    model.progress.unlockedFloors = 18;
+    model.progress.gameTime = 12 * 60 + 30;
+    model.upgrades.speedLevel = 3;
+
+    model.startNewGame();
+
+    assert(model.progress.day === 1, 'new game should reset the day');
+    assert(model.progress.level === 1, 'new game should reset the level');
+    assert(model.progress.gameTime === START_TIME, 'new game should return to the morning start time');
+    assert(model.progress.unlockedFloors === 5, 'new game should reset to the first level floor set');
+    assert(model.economy.coins === 20, 'new game should reset coins');
+    assert(model.economy.stars === 0, 'new game should reset stars');
+    assert(model.economy.bestScore === 0, 'new game should reset best score');
+    assert(model.upgrades.speedLevel === 0, 'new game should clear upgrades');
+    assert(!model.progress.started, 'new game should wait for the start button');
+}
+
+function testRestoreReturnsToCleanLevelStart(): void {
+    const model = createRunningModel('1-2');
+    model.createPassenger(0, 2);
+    model.update(5);
+    const snapshot = model.snapshot();
+
+    const restored = new GameModel();
+    restored.restore(snapshot);
+
+    assert(!restored.progress.started, 'restored preview sessions should wait for the start button');
+    assert(restored.passengers.length === 0, 'restoring should clear transient run passengers');
+    assert(restored.progress.gameTime === START_TIME, 'restoring should reset the run clock to the level start');
+    assert(restored.elevator.currentFloor === 0, 'restoring should return the elevator to the lobby');
+}
+
 function testFloorExtensionHasNoArtificialSixFloorCap(): void {
     const model = createRunningModel();
     model.progress.unlockedFloors = 6;
@@ -385,7 +475,7 @@ function testFloorExtensionHasNoArtificialSixFloorCap(): void {
 }
 
 function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
-    const model = createRunningModel();
+    const model = createRunningModel('2-1');
     model.elevators[0].capacity = 5;
     model.elevators[1].capacity = 5;
     for (let i = 0; i < 10; i += 1) {
@@ -402,7 +492,7 @@ function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
 }
 
 function testFloorCommandsStayOnExplicitElevator(): void {
-    const model = createRunningModel();
+    const model = createRunningModel('2-1');
     model.progress.unlockedFloors = 5;
 
     assert(model.queueFloorForElevator(4, 1), 'S2 should accept an explicit floor command');
@@ -411,7 +501,7 @@ function testFloorCommandsStayOnExplicitElevator(): void {
 }
 
 function testExplicitElevatorQueueSurvivesControlSwitch(): void {
-    const model = createRunningModel();
+    const model = createRunningModel('2-1');
     model.progress.unlockedFloors = 6;
 
     assert(model.queueFloorForElevator(2, 0), 'S1 should start toward floor 2');
@@ -441,7 +531,7 @@ function testExplicitElevatorQueueSurvivesControlSwitch(): void {
 }
 
 function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
-    const model = createRunningModel();
+    const model = createRunningModel('1-3');
     const passenger = model.createPassenger(0, 1);
     passenger.patience = passenger.maxPatience;
     passenger.state = PassengerState.Riding;
@@ -457,44 +547,95 @@ function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
     assert(model.economy.bestScore === 30, 'best score should track the highest run score');
     assert(model.economy.multiplier === 3, 'high-patience delivery should set the current multiplier to 3X');
     assert(deliveredEvents[0].multiplier === 3, 'delivery event should expose the floating badge multiplier');
+    assert(deliveredEvents[0].scoreGain === 30, 'delivery event should expose the score gain for UI feedback');
+}
+
+function testPassengerDestinationColorStaysStableWhileBoarding(): void {
+    const model = createRunningModel('1-3');
+    const passenger = model.createPassenger(0, 4);
+    const colorIndex = passenger.destinationColorIndex;
+
+    assert(colorIndex === model.getFloorColorIndex(4), 'passenger should cache the destination floor color index');
+    assert(model.boardAtCurrentFloor() === 1, 'the passenger should start boarding');
+    model.update(0.23);
+
+    assert(passenger.state === PassengerState.Riding, 'the passenger should enter the cabin');
+    assert(
+        passenger.destinationColorIndex === colorIndex,
+        'boarding into the elevator must not change the passenger destination color',
+    );
 }
 
 function testFloorTypesAndRushWarnings(): void {
     const model = new GameModel();
 
-    assert(model.getFloorType(-2) === 'parking', 'B2 should be a parking floor');
-    assert(model.getFloorType(-1) === 'parking', 'B1 should be a parking floor');
     assert(model.getFloorType(0) === 'ground', 'G should be the ground lobby');
-    assert(model.getFloorType(1) === 'restaurant', 'floor 1 should be the restaurant');
-    assert(model.getFloorType(2) === 'rest', 'floor 2 should be the rest floor');
-    assert(model.getFloorType(10) === 'office', 'upper floors should default to office');
-    assert(model.progress.gameTime === START_TIME, 'the game clock should start at 07:00');
+    assert(model.getFloorType(1) === 'office', 'chapter one floors should default to office');
+    assert(model.activeElevatorCount === 1, 'the first level should expose only one elevator');
+    assert(model.progress.gameTime === START_TIME, 'the game clock should start at 06:00');
 
     const warnings = model.getUpcomingRushEvents(2);
-    assert(warnings.length === 2, '07:00 should warn about the first two morning rush events');
-    assert(warnings[0].fromType === 'ground' && warnings[0].toType === 'office', 'first warning should be lobby to office');
-    assert(warnings[1].fromType === 'parking' && warnings[1].toType === 'office', 'second warning should be parking to office');
+    assert(warnings.length === 0, 'chapter one should not show rush warnings yet');
+
+    model.loadLevel('2-1');
+    assert(model.activeElevatorCount === 2, 'level 2-1 should enable the second elevator');
 }
 
 function testRushEventGeneratesTypedPassengerRequests(): void {
     const model = createRunningModel();
 
-    model.update(60 / TIME_SCALE);
+    model.update(1.9);
+    assert(model.drainTrafficSpawnRequests().length === 0, 'ambient traffic should wait for the configured first delay');
+    model.update(0.2);
     const requests = model.drainTrafficSpawnRequests();
-    const morningRequests = requests.filter((request) => request.originFloor === 0);
 
-    assert(morningRequests.length === 6, '08:00 rush should create a controlled lobby passenger wave');
-    assert(
-        morningRequests.every((request) => model.getFloorType(request.destinationFloor) === 'office'),
-        'lobby rush passengers should all target office floors',
-    );
+    assert(requests.length >= 1, 'chapter one should create gentle ambient passenger requests');
+    assert(requests.every((request) => request.originFloor !== request.destinationFloor), 'ambient passengers need a real destination');
+}
+
+function testDifficultyScalesTrafficByLevelAndFloorCount(): void {
+    const early = createRunningModel();
+    assert(early.currentTimeScale === 1.5, 'level 1-2 should use the second beginner time scale');
+    assert(early.currentWaitingPassengerLimit === 14, 'level 1-2 should use its own queue cap');
+
+    const later = createRunningModel('2-1');
+    assert(later.currentTimeScale === 2.5, 'the hidden 2-1 config should use the next difficulty band');
+    assert(later.currentWaitingPassengerLimit === 20, 'level 2-1 should raise the queue cap');
+
+    assert(later.activeElevatorCount === 2, 'level 2-1 should be ready for dual-elevator tuning');
+}
+
+function testAmbientAndSmallQueueUseRealTimeAndAnyFloor(): void {
+    const originalRandom = Math.random;
+    Math.random = () => 0;
+    try {
+        const model = createRunningModel();
+        model.update(1.9);
+        assert(model.drainTrafficSpawnRequests().length === 0, 'ambient traffic should wait for its first short delay');
+
+        model.update(0.2);
+        const ambientRequests = model.drainTrafficSpawnRequests();
+
+        assert(model.currentWaitingPassengerLimit === 14, 'level 1-2 waiting queue should use its configured cap');
+        assert(ambientRequests.length === 1, 'ambient traffic should spawn one passenger early');
+        assert(ambientRequests[0].originFloor === 0, 'ambient traffic can start from any unlocked floor');
+        assert(ambientRequests[0].destinationFloor === 1, 'ambient traffic can target any different unlocked floor');
+
+        model.update(40);
+        const smallQueueRequests = model.drainTrafficSpawnRequests();
+        assert(smallQueueRequests.length >= 2, 'small queues should appear on the opening rhythm');
+    } finally {
+        Math.random = originalRandom;
+    }
 }
 
 testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
 testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
 testPassengerWaitTimingMatchesFortySecondRule();
-testAutomaticBoardingMatchesArrivalDirection();
+testCallingPassengerFloorDoesNotAutoBoardWithoutOnwardStop();
+testAutomaticBoardingMatchesOnwardDirection();
+testAutomaticBoardingAfterUnloadingMatchesArrivalDirection();
 testCapacityKeepsRemainingPassengersInFifoQueue();
 testPassengerPatienceRestartsInsideElevator();
 testAutomaticBoardingCannotSkipQueueHead();
@@ -506,11 +647,16 @@ testElevatorCanTravelToSecondAndThirdFloors();
 testPassengersLeaveOneAtATimeWithSeparateEvents();
 testPatienceWarningAndFailureRule();
 testRestartClearsFailedRun();
+testStartNewGameResetsProgressAndEconomy();
+testRestoreReturnsToCleanLevelStart();
 testFloorExtensionHasNoArtificialSixFloorCap();
 testSecondElevatorTakesOverflowWhenBothCabinsShareFloor();
 testFloorCommandsStayOnExplicitElevator();
 testExplicitElevatorQueueSurvivesControlSwitch();
 testDeliveryAddsRunScoreAndMultiplierProgress();
+testPassengerDestinationColorStaysStableWhileBoarding();
 testFloorTypesAndRushWarnings();
 testRushEventGeneratesTypedPassengerRequests();
+testDifficultyScalesTrafficByLevelAndFloorCount();
+testAmbientAndSmallQueueUseRealTimeAndAnyFloor();
 console.log('MODEL_DIRECTION_RULES_OK');

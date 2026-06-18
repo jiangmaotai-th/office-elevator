@@ -17,6 +17,7 @@ export interface PassengerModel {
     id: number;
     originFloor: number;
     destinationFloor: number;
+    destinationColorIndex: number;
     waitElapsed: number;
     patience: number;
     maxPatience: number;
@@ -33,6 +34,7 @@ export interface PassengerDeliveredEvent {
     passengerId: number;
     floor: number;
     multiplier: number;
+    scoreGain: number;
     stopDeliveredCount: number;
     totalDelivered: number;
     elevatorIndex?: number;
@@ -68,6 +70,7 @@ export interface EconomyModel {
 export interface ProgressModel {
     day: number;
     level: number;
+    currentLevelId?: string;
     targetDeliveries: number;
     unlockedFloors: number;
     elapsedSeconds: number;
@@ -87,6 +90,60 @@ export interface RushEventModel {
     amount: number;
     label: string;
     triggered: boolean;
+}
+
+export type EnabledSystem =
+    | 'patience'
+    | 'multiplier'
+    | 'rushWarning'
+    | 'multiElevator'
+    | 'transfer'
+    | 'parking'
+    | 'restaurant'
+    | 'restFloor';
+
+export interface PassengerSpawnRules {
+    ambientFirstDelaySeconds: number;
+    ambientMinIntervalSeconds: number;
+    ambientMaxIntervalSeconds: number;
+    ambientMin: number;
+    ambientMax: number;
+    smallQueueIntervalSeconds: number;
+    smallQueueMin: number;
+    smallQueueMax: number;
+    maxWaitingPassengers: number;
+}
+
+export interface WinCondition {
+    type: 'deliverCount' | 'score';
+    value: number;
+}
+
+export interface FailCondition {
+    type: 'lostPassengers';
+    max: number;
+}
+
+export interface LevelConfig {
+    id: string;
+    chapter: string;
+    title: string;
+    description: string;
+    floors: number[];
+    elevators: number;
+    floorTypes: Partial<Record<number, FloorType>>;
+    passengerSpawnRules: PassengerSpawnRules;
+    rushEvents: RushEventModel[];
+    enabledSystems: EnabledSystem[];
+    winCondition: WinCondition;
+    failCondition: FailCondition;
+}
+
+export interface LevelResult {
+    stars: number;
+    delivered: number;
+    lost: number;
+    score: number;
 }
 
 export interface RushWarningModel extends RushEventModel {

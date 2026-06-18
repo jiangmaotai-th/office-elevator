@@ -25,8 +25,8 @@ export class GameRoot extends Component {
     private audioManager: AudioManager | null = null;
 
     onLoad(): void {
-        // Keep both elevator shafts visible on narrow preview windows and phones.
-        view.setDesignResolutionSize(720, 1280, ResolutionPolicy.SHOW_ALL);
+        // Portrait phones should fill the screen width and reveal extra vertical tower space.
+        view.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_WIDTH);
         game.frameRate = 60;
 
         const canvasNode = new Node('Canvas');

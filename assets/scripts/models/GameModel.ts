@@ -4,6 +4,8 @@ import {
     ElevatorModel,
     FloorType,
     GameSnapshot,
+    LevelConfig,
+    LevelResult,
     PassengerModel,
     PassengerBoardedEvent,
     PassengerDeliveredEvent,
@@ -17,8 +19,9 @@ import {
     UpgradeType,
 } from './GameTypes';
 
-export const START_TIME = 7 * 60;
-export const TIME_SCALE = 10;
+export const START_TIME = 6 * 60;
+export const TIME_SCALE = 1;
+const SNAPSHOT_VERSION = 2;
 const MIN_FLOOR = -2;
 const INITIAL_UNLOCKED_FLOORS = 11;
 const DEFAULT_MAX_FLOOR = 10;
@@ -29,8 +32,163 @@ const PATIENCE_RING_RATIO = 0.5;
 const PATIENCE_WARNING_RATIO = 0.75;
 const WARNING_SOUND_INTERVAL = 0.8;
 const ELEVATOR_COUNT = 2;
+const ELEVATOR_CAPACITY = 5;
 const DELIVERY_SCORE_BASE = 10;
-const LOW_TRAFFIC_INTERVAL_MINUTES = 25;
+
+interface DifficultyConfig {
+    maxLevel: number;
+    timeScale: number;
+    targetDeliveries: number;
+    ambientFirstDelaySeconds: number;
+    ambientMinIntervalSeconds: number;
+    ambientMaxIntervalSeconds: number;
+    ambientMin: number;
+    ambientMax: number;
+    smallQueueIntervalSeconds: number;
+    smallQueueMin: number;
+    smallQueueMax: number;
+    rushCap: number;
+    maxWaitingPassengers: number;
+    parkingTrafficEnabled: boolean;
+}
+
+const DIFFICULTY_STAGES: DifficultyConfig[] = [
+    { maxLevel: 1, timeScale: 1, targetDeliveries: 12, ambientFirstDelaySeconds: 3, ambientMinIntervalSeconds: 8, ambientMaxIntervalSeconds: 13, ambientMin: 1, ambientMax: 1, smallQueueIntervalSeconds: 45, smallQueueMin: 2, smallQueueMax: 3, rushCap: 5, maxWaitingPassengers: 16, parkingTrafficEnabled: false },
+    { maxLevel: 2, timeScale: 1.5, targetDeliveries: 18, ambientFirstDelaySeconds: 3, ambientMinIntervalSeconds: 7, ambientMaxIntervalSeconds: 12, ambientMin: 1, ambientMax: 2, smallQueueIntervalSeconds: 45, smallQueueMin: 3, smallQueueMax: 4, rushCap: 8, maxWaitingPassengers: 20, parkingTrafficEnabled: true },
+    { maxLevel: 3, timeScale: 2, targetDeliveries: 24, ambientFirstDelaySeconds: 2, ambientMinIntervalSeconds: 6, ambientMaxIntervalSeconds: 11, ambientMin: 1, ambientMax: 2, smallQueueIntervalSeconds: 40, smallQueueMin: 4, smallQueueMax: 5, rushCap: 10, maxWaitingPassengers: 24, parkingTrafficEnabled: true },
+    { maxLevel: 5, timeScale: 2.5, targetDeliveries: 32, ambientFirstDelaySeconds: 2, ambientMinIntervalSeconds: 5, ambientMaxIntervalSeconds: 10, ambientMin: 2, ambientMax: 2, smallQueueIntervalSeconds: 40, smallQueueMin: 5, smallQueueMax: 6, rushCap: 14, maxWaitingPassengers: 30, parkingTrafficEnabled: true },
+    { maxLevel: 7, timeScale: 3, targetDeliveries: 42, ambientFirstDelaySeconds: 2, ambientMinIntervalSeconds: 4, ambientMaxIntervalSeconds: 9, ambientMin: 2, ambientMax: 3, smallQueueIntervalSeconds: 35, smallQueueMin: 6, smallQueueMax: 8, rushCap: 18, maxWaitingPassengers: 38, parkingTrafficEnabled: true },
+    { maxLevel: Number.MAX_SAFE_INTEGER, timeScale: 3.5, targetDeliveries: 54, ambientFirstDelaySeconds: 2, ambientMinIntervalSeconds: 3, ambientMaxIntervalSeconds: 8, ambientMin: 3, ambientMax: 4, smallQueueIntervalSeconds: 35, smallQueueMin: 8, smallQueueMax: 10, rushCap: 24, maxWaitingPassengers: 48, parkingTrafficEnabled: true },
+];
+
+const FLOOR_RUSH_CAPS = [
+    { maxUnlockedFloors: 5, rushCap: 6 },
+    { maxUnlockedFloors: 8, rushCap: 8 },
+    { maxUnlockedFloors: 11, rushCap: 10 },
+    { maxUnlockedFloors: 14, rushCap: 14 },
+    { maxUnlockedFloors: 18, rushCap: 18 },
+    { maxUnlockedFloors: Number.MAX_SAFE_INTEGER, rushCap: 24 },
+];
+
+const RUSH_ROUTE_MULTIPLIERS: Partial<Record<`${FloorType}-${FloorType}`, number>> = {
+    'ground-office': 1,
+    'parking-office': 0.8,
+    'office-restaurant': 0.7,
+    'restaurant-office': 0.7,
+    'office-rest': 0.35,
+    'rest-office': 0.35,
+    'office-ground': 1,
+    'office-parking': 0.8,
+};
+
+const LEVEL_CONFIGS: LevelConfig[] = [
+    {
+        id: '1-1',
+        chapter: '第 1 章 基础教学',
+        title: '1-1 第一台电梯',
+        description: '点击楼层派出电梯，到达后点击轿厢让乘客上车。',
+        floors: [0, 1, 2, 3, 4],
+        elevators: 1,
+        floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office' },
+        passengerSpawnRules: {
+            ambientFirstDelaySeconds: 2,
+            ambientMinIntervalSeconds: 7,
+            ambientMaxIntervalSeconds: 11,
+            ambientMin: 1,
+            ambientMax: 1,
+            smallQueueIntervalSeconds: 45,
+            smallQueueMin: 2,
+            smallQueueMax: 2,
+            maxWaitingPassengers: 12,
+        },
+        rushEvents: [],
+        enabledSystems: [],
+        winCondition: { type: 'deliverCount', value: 10 },
+        failCondition: { type: 'lostPassengers', max: 999 },
+    },
+    {
+        id: '1-2',
+        chapter: '第 1 章 基础教学',
+        title: '1-2 耐心系统',
+        description: '乘客等待会消耗耐心，红圈乘客需要优先处理。',
+        floors: [0, 1, 2, 3, 4, 5],
+        elevators: 1,
+        floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office', 5: 'office' },
+        passengerSpawnRules: {
+            ambientFirstDelaySeconds: 2,
+            ambientMinIntervalSeconds: 6,
+            ambientMaxIntervalSeconds: 10,
+            ambientMin: 1,
+            ambientMax: 1,
+            smallQueueIntervalSeconds: 40,
+            smallQueueMin: 2,
+            smallQueueMax: 3,
+            maxWaitingPassengers: 14,
+        },
+        rushEvents: [],
+        enabledSystems: ['patience'],
+        winCondition: { type: 'deliverCount', value: 14 },
+        failCondition: { type: 'lostPassengers', max: 0 },
+    },
+    {
+        id: '1-3',
+        chapter: '第 1 章 基础教学',
+        title: '1-3 倍数系统',
+        description: '高耐心送达会获得 2X / 3X 分数，争取快速送达。',
+        floors: [0, 1, 2, 3, 4, 5, 6],
+        elevators: 1,
+        floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office', 5: 'office', 6: 'office' },
+        passengerSpawnRules: {
+            ambientFirstDelaySeconds: 2,
+            ambientMinIntervalSeconds: 5,
+            ambientMaxIntervalSeconds: 9,
+            ambientMin: 1,
+            ambientMax: 2,
+            smallQueueIntervalSeconds: 35,
+            smallQueueMin: 3,
+            smallQueueMax: 4,
+            maxWaitingPassengers: 16,
+        },
+        rushEvents: [],
+        enabledSystems: ['patience', 'multiplier'],
+        winCondition: { type: 'deliverCount', value: 18 },
+        failCondition: { type: 'lostPassengers', max: 0 },
+    },
+    {
+        id: '2-1',
+        chapter: '第 2 章 双电梯调度',
+        title: '2-1 第二台电梯',
+        description: '两台电梯独立控制，玩家可以分别给 S1 / S2 追加停站指令。',
+        floors: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+        elevators: 2,
+        floorTypes: {
+            0: 'ground',
+            1: 'office',
+            2: 'office',
+            3: 'office',
+            4: 'office',
+            5: 'office',
+            6: 'office',
+            7: 'office',
+            8: 'office',
+        },
+        passengerSpawnRules: {
+            ambientFirstDelaySeconds: 2,
+            ambientMinIntervalSeconds: 5,
+            ambientMaxIntervalSeconds: 8,
+            ambientMin: 1,
+            ambientMax: 2,
+            smallQueueIntervalSeconds: 32,
+            smallQueueMin: 3,
+            smallQueueMax: 4,
+            maxWaitingPassengers: 20,
+        },
+        rushEvents: [],
+        enabledSystems: ['patience', 'multiplier', 'multiElevator'],
+        winCondition: { type: 'deliverCount', value: 24 },
+        failCondition: { type: 'lostPassengers', max: 1 },
+    },
+];
 
 export class GameModel {
     readonly passengers: PassengerModel[] = [];
@@ -41,7 +199,7 @@ export class GameModel {
             targetFloor: null,
             position: 0,
             direction: ElevatorDirection.Idle,
-            capacity: 6,
+            capacity: ELEVATOR_CAPACITY,
             passengers: [],
             queue: [],
             doorOpen: true,
@@ -52,7 +210,7 @@ export class GameModel {
             targetFloor: null,
             position: 0,
             direction: ElevatorDirection.Idle,
-            capacity: 6,
+            capacity: ELEVATOR_CAPACITY,
             passengers: [],
             queue: [],
             doorOpen: true,
@@ -75,6 +233,7 @@ export class GameModel {
     readonly progress: ProgressModel = {
         day: 1,
         level: 1,
+        currentLevelId: '1-1',
         targetDeliveries: 12,
         unlockedFloors: INITIAL_UNLOCKED_FLOORS,
         elapsedSeconds: 0,
@@ -104,7 +263,10 @@ export class GameModel {
     );
     private readonly stopDeliveredCounts: number[] = Array.from({ length: ELEVATOR_COUNT }, () => 0);
     private readonly trafficSpawnRequests: TrafficSpawnRequest[] = [];
-    private lowTrafficTimer = 0;
+    private ambientTrafficTimer = 0;
+    private nextAmbientTrafficDelaySeconds = DIFFICULTY_STAGES[0].ambientFirstDelaySeconds;
+    private smallQueueTimer = 0;
+    private readonly levelResults = new Map<string, LevelResult>();
     private readonly floorTypeOverrides = new Map<number, FloorType>([
         [-2, 'parking'],
         [-1, 'parking'],
@@ -114,20 +276,20 @@ export class GameModel {
     ]);
     readonly rushEvents: RushEventModel[] = [
         {
-            time: 8 * 60,
+            time: 9 * 60,
             warningLeadTime: 180,
             fromType: 'ground',
             toType: 'office',
-            amount: 6,
+            amount: 1,
             label: '上班高峰：大厅去办公层',
             triggered: false,
         },
         {
-            time: 8 * 60 + 20,
+            time: 9 * 60 + 40,
             warningLeadTime: 180,
             fromType: 'parking',
             toType: 'office',
-            amount: 5,
+            amount: 1,
             label: '上班高峰：停车场去办公层',
             triggered: false,
         },
@@ -136,7 +298,7 @@ export class GameModel {
             warningLeadTime: 120,
             fromType: 'office',
             toType: 'restaurant',
-            amount: 7,
+            amount: 1,
             label: '午餐高峰：办公层去餐厅',
             triggered: false,
         },
@@ -145,7 +307,7 @@ export class GameModel {
             warningLeadTime: 120,
             fromType: 'restaurant',
             toType: 'office',
-            amount: 7,
+            amount: 1,
             label: '午餐返回：餐厅回办公层',
             triggered: false,
         },
@@ -154,7 +316,7 @@ export class GameModel {
             warningLeadTime: 120,
             fromType: 'office',
             toType: 'rest',
-            amount: 3,
+            amount: 1,
             label: '下午休息：办公层去休息层',
             triggered: false,
         },
@@ -163,7 +325,7 @@ export class GameModel {
             warningLeadTime: 120,
             fromType: 'rest',
             toType: 'office',
-            amount: 3,
+            amount: 1,
             label: '休息返回：休息层回办公层',
             triggered: false,
         },
@@ -172,7 +334,7 @@ export class GameModel {
             warningLeadTime: 180,
             fromType: 'office',
             toType: 'ground',
-            amount: 6,
+            amount: 1,
             label: '下班高峰：办公层去大厅',
             triggered: false,
         },
@@ -181,14 +343,18 @@ export class GameModel {
             warningLeadTime: 180,
             fromType: 'office',
             toType: 'parking',
-            amount: 6,
+            amount: 1,
             label: '下班高峰：办公层去停车场',
             triggered: false,
         },
     ];
 
+    constructor() {
+        this.applyLevelConfig(this.currentLevelConfig);
+    }
+
     restore(snapshot: GameSnapshot | null): void {
-        if (!snapshot || snapshot.version !== 1) {
+        if (!snapshot || snapshot.version !== SNAPSHOT_VERSION) {
             return;
         }
         Object.assign(this.economy, snapshot.economy);
@@ -197,16 +363,23 @@ export class GameModel {
         this.economy.score ??= 0;
         this.economy.bestScore ??= this.economy.score;
         this.progress.started ??= false;
+        this.progress.currentLevelId ??= '1-1';
         this.progress.gameTime ??= START_TIME;
-        this.progress.unlockedFloors = Math.max(this.progress.unlockedFloors, INITIAL_UNLOCKED_FLOORS);
+        this.applyLevelConfig(this.currentLevelConfig);
         this.applyUpgradeEffects();
+        this.passengers.length = 0;
+        this.resetElevatorAndQueues();
+        this.resetTraffic();
+        this.progress.elapsedSeconds = 0;
+        this.progress.gameTime = START_TIME;
+        this.progress.started = false;
         this.progress.completed = false;
         this.progress.failed = false;
     }
 
     snapshot(): GameSnapshot {
         return {
-            version: 1,
+            version: SNAPSHOT_VERSION,
             economy: { ...this.economy },
             progress: { ...this.progress },
             upgrades: { ...this.upgrades },
@@ -219,6 +392,7 @@ export class GameModel {
             id: this.nextPassengerId++,
             originFloor,
             destinationFloor,
+            destinationColorIndex: this.getFloorColorIndex(destinationFloor),
             waitElapsed: 0,
             patience: maxPatience,
             maxPatience,
@@ -344,24 +518,64 @@ export class GameModel {
     }
 
     get minFloor(): number {
-        return MIN_FLOOR;
+        return Math.min(...this.currentLevelConfig.floors);
     }
 
     get maxUnlockedFloor(): number {
-        return this.progress.unlockedFloors - 1;
+        return Math.max(...this.currentLevelConfig.floors);
+    }
+
+    get currentTimeScale(): number {
+        return this.currentDifficulty.timeScale;
+    }
+
+    get currentWaitingPassengerLimit(): number {
+        return this.currentLevelConfig.passengerSpawnRules.maxWaitingPassengers;
+    }
+
+    get activeElevatorCount(): number {
+        return this.currentLevelConfig.elevators;
+    }
+
+    get currentLevelConfig(): LevelConfig {
+        return LEVEL_CONFIGS.find((config) => config.id === this.progress.currentLevelId) ?? LEVEL_CONFIGS[0];
+    }
+
+    get levelConfigs(): LevelConfig[] {
+        return LEVEL_CONFIGS;
+    }
+
+    getLevelStars(levelId: string): number {
+        return this.levelResults.get(levelId)?.stars ?? 0;
+    }
+
+    isSystemEnabled(system: LevelConfig['enabledSystems'][number]): boolean {
+        return this.currentLevelConfig.enabledSystems.includes(system);
     }
 
     getRenderableFloors(): number[] {
-        const maxFloor = Math.max(DEFAULT_MAX_FLOOR, this.maxUnlockedFloor);
+        const levelFloors = this.currentLevelConfig.floors;
+        const minFloor = Math.min(...levelFloors);
+        const maxLevelFloor = Math.max(...levelFloors);
+        const maxFloor = Math.max(maxLevelFloor, this.currentLevelConfig.floors.length < 7 ? maxLevelFloor : DEFAULT_MAX_FLOOR);
         const floors: number[] = [];
-        for (let floor = MIN_FLOOR; floor <= maxFloor; floor += 1) {
+        for (let floor = minFloor; floor <= maxFloor; floor += 1) {
             floors.push(floor);
         }
         return floors;
     }
 
+    getFloorColorIndex(floor: number): number {
+        const levelIndex = this.currentLevelConfig.floors.indexOf(floor);
+        if (levelIndex >= 0) {
+            return levelIndex;
+        }
+        const renderIndex = this.getRenderableFloors().indexOf(floor);
+        return Math.max(0, renderIndex);
+    }
+
     isFloorUnlocked(floor: number): boolean {
-        return floor >= MIN_FLOOR && floor <= this.maxUnlockedFloor;
+        return this.currentLevelConfig.floors.includes(floor);
     }
 
     getFloorType(floor: number): FloorType {
@@ -374,8 +588,12 @@ export class GameModel {
     }
 
     getUpcomingRushEvents(limit = 2): RushWarningModel[] {
+        if (!this.isSystemEnabled('rushWarning')) {
+            return [];
+        }
         return this.rushEvents
             .filter((event) => !event.triggered)
+            .filter((event) => this.getRushAmount(event) > 0)
             .map((event) => ({
                 ...event,
                 remainingMinutes: event.time - this.progress.gameTime,
@@ -391,6 +609,9 @@ export class GameModel {
 
     queueFloorForElevator(floor: number, elevatorIndex: number): boolean {
         const elevator = this.elevators[elevatorIndex];
+        if (elevatorIndex >= this.activeElevatorCount) {
+            return false;
+        }
         if (!this.isFloorUnlocked(floor)) {
             return false;
         }
@@ -416,6 +637,9 @@ export class GameModel {
     }
 
     boardAtElevator(elevatorIndex: number): number {
+        if (elevatorIndex >= this.activeElevatorCount) {
+            return 0;
+        }
         const boarded = this.boardPassengersAtCurrentFloor(elevatorIndex, () => true);
         const elevator = this.elevators[elevatorIndex];
         if (!elevator || this.elevatorOccupancyAt(elevatorIndex) < elevator.capacity) {
@@ -424,6 +648,7 @@ export class GameModel {
 
         const overflowIndex = this.elevators.findIndex((other, index) => {
             return index !== elevatorIndex
+                && index < this.activeElevatorCount
                 && other.currentFloor === elevator.currentFloor
                 && Math.abs(other.position - elevator.position) < 0.001
                 && other.doorOpen
@@ -441,23 +666,29 @@ export class GameModel {
             return;
         }
         this.progress.elapsedSeconds += deltaTime;
-        const gameMinutes = deltaTime * TIME_SCALE;
+        const gameMinutes = deltaTime * this.currentTimeScale;
         this.progress.gameTime += gameMinutes;
-        this.updateTraffic(gameMinutes);
-        this.updatePatience(deltaTime, PassengerState.Waiting);
-        this.updatePatience(deltaTime, PassengerState.Riding);
-        this.updatePatience(deltaTime, PassengerState.Exiting);
-        if (this.progress.failed) {
-            return;
+        this.updateTraffic(gameMinutes, deltaTime);
+        if (this.isSystemEnabled('patience')) {
+            this.updatePatience(deltaTime, PassengerState.Waiting);
+            this.updatePatience(deltaTime, PassengerState.Riding);
+            this.updatePatience(deltaTime, PassengerState.Exiting);
+            if (this.progress.failed) {
+                return;
+            }
+            this.updatePatienceWarnings(deltaTime);
         }
-        this.updatePatienceWarnings(deltaTime);
-        this.elevators.forEach((_elevator, index) => {
+        this.elevators.slice(0, this.activeElevatorCount).forEach((_elevator, index) => {
             this.updateUnloading(deltaTime, index);
             this.updateBoarding(deltaTime, index);
             this.updateElevator(deltaTime, index);
         });
-        this.progress.completed = this.economy.delivered >= this.progress.targetDeliveries
+        const justCompleted = this.isWinConditionMet()
             && this.unloadingQueues.every((queue) => queue.length === 0);
+        if (justCompleted && !this.progress.completed) {
+            this.recordLevelResult();
+        }
+        this.progress.completed = justCompleted;
     }
 
     extendFloor(): boolean {
@@ -491,6 +722,32 @@ export class GameModel {
         this.startNextDay();
     }
 
+    loadLevel(levelId: string): boolean {
+        const level = LEVEL_CONFIGS.find((config) => config.id === levelId);
+        if (!level) {
+            return false;
+        }
+        this.progress.currentLevelId = level.id;
+        this.progress.level = LEVEL_CONFIGS.findIndex((config) => config.id === level.id) + 1;
+        this.passengers.length = 0;
+        this.resetElevatorAndQueues();
+        this.nextPassengerId = 1;
+        this.economy.score = 0;
+        this.economy.delivered = 0;
+        this.economy.lost = 0;
+        this.economy.multiplier = 1;
+        this.economy.multiplierProgress = 0;
+        this.progress.elapsedSeconds = 0;
+        this.progress.gameTime = START_TIME;
+        this.progress.started = false;
+        this.progress.completed = false;
+        this.progress.failed = false;
+        this.applyLevelConfig(level);
+        this.resetTraffic();
+        this.applyUpgradeEffects();
+        return true;
+    }
+
     restartGame(): void {
         this.passengers.length = 0;
         this.resetElevatorAndQueues();
@@ -509,6 +766,35 @@ export class GameModel {
         this.applyUpgradeEffects();
     }
 
+    startNewGame(): void {
+        this.passengers.length = 0;
+        this.resetElevatorAndQueues();
+        this.nextPassengerId = 1;
+        this.economy.coins = 20;
+        this.economy.stars = 0;
+        this.economy.score = 0;
+        this.economy.bestScore = 0;
+        this.economy.delivered = 0;
+        this.economy.lost = 0;
+        this.economy.multiplier = 1;
+        this.economy.multiplierProgress = 0;
+        this.progress.day = 1;
+        this.progress.level = 1;
+        this.progress.currentLevelId = '1-1';
+        this.applyLevelConfig(this.currentLevelConfig);
+        this.progress.targetDeliveries = this.currentLevelConfig.winCondition.value;
+        this.progress.elapsedSeconds = 0;
+        this.progress.gameTime = START_TIME;
+        this.progress.started = false;
+        this.progress.completed = false;
+        this.progress.failed = false;
+        this.upgrades.capacityLevel = 0;
+        this.upgrades.speedLevel = 0;
+        this.upgrades.patienceLevel = 0;
+        this.resetTraffic();
+        this.applyUpgradeEffects();
+    }
+
     private updatePatience(deltaTime: number, state: PassengerState): void {
         for (const passenger of this.passengers.filter((candidate) => candidate.state === state)) {
             passenger.waitElapsed += deltaTime;
@@ -521,35 +807,71 @@ export class GameModel {
             this.economy.lost += 1;
             this.economy.multiplier = 1;
             this.economy.multiplierProgress = 0;
-            this.progress.failed = true;
+            this.progress.failed = this.economy.lost > this.currentLevelConfig.failCondition.max;
             return;
         }
     }
 
-    private updateTraffic(gameMinutes: number): void {
+    private updateTraffic(gameMinutes: number, deltaTime: number): void {
+        let spawnedRush = false;
         this.rushEvents.forEach((event) => {
             if (event.triggered || this.progress.gameTime < event.time) {
                 return;
             }
-            this.enqueueTrafficPassengers(event.fromType, event.toType, event.amount);
+            this.enqueueTrafficPassengers(event.fromType, event.toType, this.getRushAmount(event));
             event.triggered = true;
+            spawnedRush = true;
         });
 
-        this.lowTrafficTimer += gameMinutes;
-        if (this.lowTrafficTimer < LOW_TRAFFIC_INTERVAL_MINUTES) {
+        const spawnRules = this.currentLevelConfig.passengerSpawnRules;
+        if (spawnedRush) {
+            this.smallQueueTimer = 0;
             return;
         }
-        this.lowTrafficTimer %= LOW_TRAFFIC_INTERVAL_MINUTES;
-        const routes: Array<[FloorType, FloorType]> = [
-            ['ground', 'office'],
-            ['parking', 'office'],
-            ['office', 'ground'],
-            ['office', 'parking'],
-            ['office', 'restaurant'],
-            ['office', 'rest'],
-        ];
-        const route = routes[Math.floor(Math.random() * routes.length)];
-        this.enqueueTrafficPassengers(route[0], route[1], 1 + Math.floor(Math.random() * 2));
+
+        this.ambientTrafficTimer += deltaTime;
+        if (this.ambientTrafficTimer >= this.nextAmbientTrafficDelaySeconds) {
+            this.ambientTrafficTimer = 0;
+            this.nextAmbientTrafficDelaySeconds = this.rollAmbientTrafficDelaySeconds(spawnRules);
+            this.enqueueRandomLowTrafficPassengers(this.rollAmount(spawnRules.ambientMin, spawnRules.ambientMax));
+        }
+
+        this.smallQueueTimer += deltaTime;
+        if (this.smallQueueTimer >= spawnRules.smallQueueIntervalSeconds) {
+            this.smallQueueTimer %= spawnRules.smallQueueIntervalSeconds;
+            this.enqueueRandomLowTrafficPassengers(this.rollAmount(spawnRules.smallQueueMin, spawnRules.smallQueueMax));
+        }
+    }
+
+    private rollAmbientTrafficDelaySeconds(spawnRules: LevelConfig['passengerSpawnRules']): number {
+        const range = spawnRules.ambientMaxIntervalSeconds - spawnRules.ambientMinIntervalSeconds;
+        return spawnRules.ambientMinIntervalSeconds + Math.random() * Math.max(0, range);
+    }
+
+    private rollAmount(min: number, max: number): number {
+        return min + Math.floor(Math.random() * (max - min + 1));
+    }
+
+    private get currentDifficulty(): DifficultyConfig {
+        return DIFFICULTY_STAGES.find((stage) => this.progress.level <= stage.maxLevel)
+            ?? DIFFICULTY_STAGES[DIFFICULTY_STAGES.length - 1];
+    }
+
+    private get floorRushCap(): number {
+        const floorCap = FLOOR_RUSH_CAPS.find((entry) => this.progress.unlockedFloors <= entry.maxUnlockedFloors);
+        return floorCap?.rushCap ?? FLOOR_RUSH_CAPS[FLOOR_RUSH_CAPS.length - 1].rushCap;
+    }
+
+    private getRushAmount(event: RushEventModel): number {
+        const difficulty = this.currentDifficulty;
+        if (!difficulty.parkingTrafficEnabled && (event.fromType === 'parking' || event.toType === 'parking')) {
+            return 0;
+        }
+        const routeKey = `${event.fromType}-${event.toType}` as `${FloorType}-${FloorType}`;
+        const multiplier = RUSH_ROUTE_MULTIPLIERS[routeKey] ?? 0.6;
+        const cap = Math.min(difficulty.rushCap, this.floorRushCap);
+        const amount = Math.round(cap * multiplier);
+        return Math.max(0, Math.min(cap, amount));
     }
 
     private enqueueTrafficPassengers(fromType: FloorType, toType: FloorType, amount: number): void {
@@ -568,6 +890,21 @@ export class GameModel {
             }
             if (destinationFloor === originFloor) {
                 continue;
+            }
+            this.trafficSpawnRequests.push({ originFloor, destinationFloor });
+        }
+    }
+
+    private enqueueRandomLowTrafficPassengers(amount: number): void {
+        const floors = this.getRenderableFloors().filter((floor) => this.isFloorUnlocked(floor));
+        if (floors.length < 2) {
+            return;
+        }
+        for (let index = 0; index < amount; index += 1) {
+            const originFloor = floors[Math.floor(Math.random() * floors.length)];
+            let destinationFloor = floors[Math.floor(Math.random() * floors.length)];
+            if (destinationFloor === originFloor) {
+                destinationFloor = floors[(floors.indexOf(originFloor) + 1) % floors.length];
             }
             this.trafficSpawnRequests.push({ originFloor, destinationFloor });
         }
@@ -609,7 +946,7 @@ export class GameModel {
         elevator.direction = ElevatorDirection.Idle;
         elevator.doorOpen = true;
         if (!this.beginUnloadingAtCurrentFloor(elevatorIndex, arrivalDirection)) {
-            this.boardForArrivalDirection(elevatorIndex, arrivalDirection);
+            this.boardForOnwardDirection(elevatorIndex);
         }
     }
 
@@ -679,7 +1016,9 @@ export class GameModel {
             const elevator = this.elevators[elevatorIndex];
             elevator.passengers = elevator.passengers.filter((id) => id !== passenger.id);
             const patienceRatio = passenger.patience / passenger.maxPatience;
-            const deliveryMultiplier = patienceRatio >= 0.8
+            const deliveryMultiplier = !this.isSystemEnabled('multiplier')
+                ? 1
+                : patienceRatio >= 0.8
                 ? 3
                 : patienceRatio >= 0.5
                     ? 2
@@ -696,6 +1035,7 @@ export class GameModel {
                 passengerId: passenger.id,
                 floor: elevator.currentFloor,
                 multiplier: deliveryMultiplier,
+                scoreGain,
                 stopDeliveredCount: this.stopDeliveredCounts[elevatorIndex],
                 totalDelivered: this.economy.delivered,
                 elevatorIndex,
@@ -703,16 +1043,28 @@ export class GameModel {
         }
 
         if (unloadingQueue.length === 0 && this.pendingArrivalDirections[elevatorIndex] !== null) {
-            const arrivalDirection = this.pendingArrivalDirections[elevatorIndex];
             this.pendingArrivalDirections[elevatorIndex] = null;
-            this.boardForArrivalDirection(elevatorIndex, arrivalDirection);
+            this.boardForOnwardDirection(elevatorIndex);
         }
     }
 
-    private boardForArrivalDirection(elevatorIndex: number, arrivalDirection: ElevatorDirection): void {
+    private boardForOnwardDirection(elevatorIndex: number): void {
+        const direction = this.getOnwardDirection(elevatorIndex);
+        if (direction === ElevatorDirection.Idle) {
+            return;
+        }
         this.boardPassengersAtCurrentFloor(elevatorIndex, (passenger) => {
-            return Math.sign(passenger.destinationFloor - passenger.originFloor) === arrivalDirection;
+            return Math.sign(passenger.destinationFloor - passenger.originFloor) === direction;
         });
+    }
+
+    private getOnwardDirection(elevatorIndex: number): ElevatorDirection {
+        const elevator = this.elevators[elevatorIndex];
+        const nextStop = elevator.queue.find((floor) => floor !== elevator.currentFloor);
+        if (nextStop === undefined) {
+            return ElevatorDirection.Idle;
+        }
+        return nextStop > elevator.currentFloor ? ElevatorDirection.Up : ElevatorDirection.Down;
     }
 
     private get elevatorSpeed(): number {
@@ -721,7 +1073,7 @@ export class GameModel {
 
     private applyUpgradeEffects(): void {
         this.elevators.forEach((elevator) => {
-            elevator.capacity = 6 + this.upgrades.capacityLevel;
+            elevator.capacity = ELEVATOR_CAPACITY;
         });
     }
 
@@ -733,6 +1085,54 @@ export class GameModel {
         passenger.maxPatience = this.maxPassengerPatience;
         passenger.waitElapsed = 0;
         passenger.patience = passenger.maxPatience;
+    }
+
+    private isWinConditionMet(): boolean {
+        const condition = this.currentLevelConfig.winCondition;
+        if (condition.type === 'score') {
+            return this.economy.score >= condition.value;
+        }
+        return this.economy.delivered >= condition.value;
+    }
+
+    private recordLevelResult(): void {
+        const stars = this.calculateLevelStars();
+        const previous = this.levelResults.get(this.currentLevelConfig.id);
+        if (previous && previous.stars >= stars) {
+            return;
+        }
+        this.levelResults.set(this.currentLevelConfig.id, {
+            stars,
+            delivered: this.economy.delivered,
+            lost: this.economy.lost,
+            score: this.economy.score,
+        });
+    }
+
+    private calculateLevelStars(): number {
+        const perfectScoreTarget = this.currentLevelConfig.winCondition.value
+            * (this.isSystemEnabled('multiplier') ? DELIVERY_SCORE_BASE * 2 : DELIVERY_SCORE_BASE);
+        if (this.economy.lost === 0 && this.economy.score >= perfectScoreTarget) {
+            return 3;
+        }
+        if (this.economy.lost <= Math.max(1, Math.floor(this.currentLevelConfig.failCondition.max * 0.5))) {
+            return 2;
+        }
+        return 1;
+    }
+
+    private applyLevelConfig(level: LevelConfig): void {
+        this.floorTypeOverrides.clear();
+        Object.entries(level.floorTypes).forEach(([floor, type]) => {
+            if (type) {
+                this.floorTypeOverrides.set(Number(floor), type);
+            }
+        });
+        this.progress.currentLevelId = level.id;
+        this.progress.targetDeliveries = level.winCondition.value;
+        this.progress.unlockedFloors = level.floors.length;
+        this.rushEvents.length = 0;
+        level.rushEvents.forEach((event) => this.rushEvents.push({ ...event, triggered: false }));
     }
 
     private boardPassengersAtCurrentFloor(
@@ -813,7 +1213,7 @@ export class GameModel {
         this.resetElevatorAndQueues();
         this.progress.day += 1;
         this.progress.level += 1;
-        this.progress.targetDeliveries += 6;
+        this.progress.targetDeliveries = this.currentDifficulty.targetDeliveries;
         this.progress.elapsedSeconds = 0;
         this.progress.gameTime = START_TIME;
         this.progress.started = false;
@@ -832,7 +1232,9 @@ export class GameModel {
             event.triggered = false;
         });
         this.trafficSpawnRequests.length = 0;
-        this.lowTrafficTimer = 0;
+        this.ambientTrafficTimer = 0;
+        this.nextAmbientTrafficDelaySeconds = this.currentLevelConfig.passengerSpawnRules.ambientFirstDelaySeconds;
+        this.smallQueueTimer = 0;
     }
 
     private resetElevatorAndQueues(): void {
