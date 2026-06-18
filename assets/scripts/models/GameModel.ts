@@ -24,7 +24,8 @@ export const TIME_SCALE = 1;
 const SNAPSHOT_VERSION = 2;
 const MIN_FLOOR = -2;
 const INITIAL_UNLOCKED_FLOORS = 11;
-const DEFAULT_MAX_FLOOR = 10;
+const LEVEL_MAX_FLOOR = 5;
+const DEFAULT_MAX_FLOOR = LEVEL_MAX_FLOOR;
 const BOARDING_INTERVAL = 0.22;
 const UNLOADING_INTERVAL = 0.28;
 const PASSENGER_WAIT_SECONDS = 40;
@@ -147,9 +148,9 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         chapter: '第 1 章 基础教学',
         title: '1-3 调度评分',
         description: '关卡目标改为高分通关：少绕路、少中停、快送达。',
-        floors: [0, 1, 2, 3, 4, 5, 6],
+        floors: [0, 1, 2, 3, 4, 5],
         elevators: 1,
-        floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office', 5: 'office', 6: 'office' },
+        floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office', 5: 'office' },
         passengerSpawnRules: {
             ambientFirstDelaySeconds: 2,
             ambientMinIntervalSeconds: 5,
@@ -171,7 +172,7 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         chapter: '第 2 章 双电梯调度',
         title: '2-1 第二台电梯',
         description: '两台电梯独立控制，玩家可以分别给 S1 / S2 追加停站指令。',
-        floors: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+        floors: [0, 1, 2, 3, 4, 5],
         elevators: 2,
         floorTypes: {
             0: 'ground',
@@ -180,9 +181,6 @@ const LEVEL_CONFIGS: LevelConfig[] = [
             3: 'office',
             4: 'office',
             5: 'office',
-            6: 'office',
-            7: 'office',
-            8: 'office',
         },
         passengerSpawnRules: {
             ambientFirstDelaySeconds: 2,
@@ -204,22 +202,21 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         id: '4-1',
         chapter: '第 4 章 空中大堂',
         title: '4-1 第一次换乘',
-        description: '低区电梯到 10F，中转后换乘高区电梯去高层。',
-        floors: Array.from({ length: 21 }, (_value, index) => index),
+        description: '右侧低区电梯到 3F，中转后换乘左侧高区电梯去高层。',
+        floors: [0, 1, 2, 3, 4, 5],
         elevators: 2,
         elevatorServiceRanges: [
-            { min: 0, max: 10 },
-            { min: 10, max: 20 },
+            { min: 0, max: 3 },
+            { min: 3, max: 5 },
         ],
-        transferFloor: 10,
+        transferFloor: 3,
         floorTypes: {
             0: 'ground',
-            10: 'rest',
-            16: 'office',
-            17: 'office',
-            18: 'office',
-            19: 'office',
-            20: 'office',
+            1: 'office',
+            2: 'office',
+            3: 'rest',
+            4: 'office',
+            5: 'office',
         },
         passengerSpawnRules: {
             ambientFirstDelaySeconds: 2,
@@ -612,7 +609,10 @@ export class GameModel {
         const levelFloors = this.currentLevelConfig.floors;
         const minFloor = Math.min(...levelFloors);
         const maxLevelFloor = Math.max(...levelFloors);
-        const maxFloor = Math.max(maxLevelFloor, this.currentLevelConfig.floors.length < 7 ? maxLevelFloor : DEFAULT_MAX_FLOOR);
+        const maxFloor = Math.min(
+            LEVEL_MAX_FLOOR,
+            Math.max(maxLevelFloor, this.currentLevelConfig.floors.length < 7 ? maxLevelFloor : DEFAULT_MAX_FLOOR),
+        );
         const floors: number[] = [];
         for (let floor = minFloor; floor <= maxFloor; floor += 1) {
             floors.push(floor);
@@ -630,7 +630,7 @@ export class GameModel {
     }
 
     isFloorUnlocked(floor: number): boolean {
-        return this.currentLevelConfig.floors.includes(floor);
+        return floor <= LEVEL_MAX_FLOOR && this.currentLevelConfig.floors.includes(floor);
     }
 
     getFloorType(floor: number): FloorType {

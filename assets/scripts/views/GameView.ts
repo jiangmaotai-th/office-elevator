@@ -64,7 +64,7 @@ const TOWER_BOTTOM = -425;
 const TOWER_TOP = 430;
 const FLOOR_GAP = 138;
 const FLOOR_BASE_Y = -350;
-const MIN_VISIBLE_FLOORS = 30;
+const MIN_VISIBLE_FLOORS = 6;
 
 export interface GameHitAreas {
     floorAt(position: Vec3): number | null;
@@ -401,6 +401,10 @@ export class GameView implements GameHitAreas {
         const s2Left = 105;
         const s1Left = 220;
         const shaftWidth = 100;
+        const elevatorSlots = [
+            { index: 1, name: 'S2', x: s2Left },
+            { index: 0, name: 'S1', x: s1Left },
+        ];
         this.clickableFloors = model.progress.unlockedFloors;
         this.floorYs.clear();
         this.clickableFloorValues.length = 0;
@@ -433,8 +437,12 @@ export class GameView implements GameHitAreas {
             if (unlocked) {
                 this.drawPassengers(model, floor, y);
             }
-            this.drawEmptyShaft(s2Left, y, floorGap, 'S2');
-            this.drawEmptyShaft(s1Left, y, floorGap, 'S1');
+            elevatorSlots.forEach((slot) => {
+                const elevator = model.elevators[slot.index];
+                if (slot.index < model.activeElevatorCount && this.elevatorServesFloor(elevator, floor)) {
+                    this.drawEmptyShaft(slot.x, y, floorGap, slot.name);
+                }
+            });
         }
 
         const elevatorXs = [s1Left, s2Left];
@@ -561,6 +569,16 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
     }
 
+    private elevatorServesFloor(elevator: ElevatorModel | undefined, floor: number): boolean {
+        if (!elevator) {
+            return false;
+        }
+        if (elevator.serviceMinFloor === undefined || elevator.serviceMaxFloor === undefined) {
+            return true;
+        }
+        return floor >= elevator.serviceMinFloor && floor <= elevator.serviceMaxFloor;
+    }
+
     private drawEmptyShaft(x: number, y: number, floorGap: number, name: string): void {
         const height = Math.min(112, floorGap * 0.72);
         this.graphics.fillColor = new Color(25, 27, 30, 255);
@@ -571,12 +589,6 @@ export class GameView implements GameHitAreas {
         this.graphics.roundRect(x + 17, y + height * 0.5 - 2, 66, 24, 3);
         this.graphics.fill();
         this.drawText(`shaft-${name}-${Math.round(y)}`, name, x + 37, y + height * 0.5 + 10, 14, PAPER, 40);
-        if (name === 'S2') {
-            this.graphics.fillColor = new Color(12, 13, 15, 150);
-            this.graphics.roundRect(x + 4, y - height * 0.5 + 4, 92, height - 8, 4);
-            this.graphics.fill();
-            this.drawText(`shaft-${name}-locked-${Math.round(y)}`, '未启用', x + 27, y, 13, MUTED, 54);
-        }
     }
 
     private drawPassengers(model: GameModel, floor: number, y: number): void {
