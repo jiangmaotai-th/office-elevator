@@ -18,6 +18,12 @@ export interface PassengerModel {
     originFloor: number;
     destinationFloor: number;
     destinationColorIndex: number;
+    boardFloor?: number;
+    boardGameTime?: number;
+    actualRideDistance: number;
+    intermediateStops: number;
+    frustration: number;
+    lastElevatorFloor?: number;
     waitElapsed: number;
     patience: number;
     maxPatience: number;
@@ -33,8 +39,8 @@ export interface PassengerBoardedEvent {
 export interface PassengerDeliveredEvent {
     passengerId: number;
     floor: number;
-    multiplier: number;
     scoreGain: number;
+    qualityLabel: string;
     stopDeliveredCount: number;
     totalDelivered: number;
     elevatorIndex?: number;
@@ -63,8 +69,6 @@ export interface EconomyModel {
     bestScore: number;
     delivered: number;
     lost: number;
-    multiplier: number;
-    multiplierProgress: number;
 }
 
 export interface ProgressModel {
@@ -94,7 +98,7 @@ export interface RushEventModel {
 
 export type EnabledSystem =
     | 'patience'
-    | 'multiplier'
+    | 'qualityScore'
     | 'rushWarning'
     | 'multiElevator'
     | 'transfer'

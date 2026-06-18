@@ -355,9 +355,7 @@ export class GameView implements GameHitAreas {
         this.labels.menu.string = '菜单';
         this.labels.notice.string = this.interactionMessage || (!model.progress.started
             ? '点击开始运营后，乘客才会出现和倒计时'
-            : model.economy.multiplier > 1
-            ? `${model.economy.multiplier}X  连续高耐心送达`
-            : '点击楼层呼叫 S1，到达后点击轿厢让上班族依次进入');
+            : '少绕路、少中停、高耐心送达，单个乘客评分会更高');
         this.drawRushWarnings(model);
 
         this.strokeRect(230, 520, 100, 70, INK, 2);
@@ -755,31 +753,27 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.drawText(
             'deliveryCount',
-            `+1  ${feedback.stopDeliveredCount}`,
-            111,
+            `+${feedback.scoreGain}`,
+            112,
             floorY + 46,
-            17,
+            20,
             PAPER,
             68,
         );
-        if (feedback.multiplier > 1) {
-            const elevatorIndex = feedback.elevatorIndex ?? 0;
-            const badgeX = elevatorIndex === 0 ? 235 : 120;
-            this.graphics.fillColor = new Color(22, 23, 25, 230);
-            this.graphics.roundRect(badgeX, floorY + 78, 58, 32, 6);
-            this.graphics.fill();
-            this.drawText(
-                'deliveryMultiplier',
-                `${feedback.multiplier}X`,
-                badgeX + 11,
-                floorY + 94,
-                19,
-                GOLD,
-                38,
-            );
-        } else if (this.labels.deliveryMultiplier) {
-            this.labels.deliveryMultiplier.node.active = false;
-        }
+        const elevatorIndex = feedback.elevatorIndex ?? 0;
+        const badgeX = elevatorIndex === 0 ? 225 : 110;
+        this.graphics.fillColor = new Color(22, 23, 25, 230);
+        this.graphics.roundRect(badgeX, floorY + 78, 84, 32, 6);
+        this.graphics.fill();
+        this.drawText(
+            'deliveryMultiplier',
+            feedback.qualityLabel,
+            badgeX + 10,
+            floorY + 94,
+            17,
+            this.qualityColor(feedback.scoreGain),
+            64,
+        );
     }
 
     private drawScoreBonusFeedback(): void {
@@ -798,11 +792,9 @@ export class GameView implements GameHitAreas {
         }
         const progress = Math.min(1, elapsed / 1000);
         label.node.active = true;
-        label.color = feedback.multiplier > 1 ? GOLD : PAPER;
+        label.color = this.qualityColor(feedback.scoreGain);
         label.node.setPosition(new Vec3(-30, -503 + progress * 22));
-        label.string = feedback.multiplier > 1
-            ? `${feedback.multiplier}X +${feedback.scoreGain}`
-            : `+${feedback.scoreGain}`;
+        label.string = `+${feedback.scoreGain} ${feedback.qualityLabel}`;
     }
 
     private drawBuildButton(model: GameModel): void {
@@ -828,7 +820,7 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.strokeRect(-330, 58, 660, 335, new Color(247, 242, 234, 170), 2);
         this.drawText('level-select-title', '选择基础关卡', -300, 360, 28, PAPER, 240);
-        this.drawText('level-select-desc', '先用 1-1 到 1-3 把核心手感打稳，后续章节再逐步解锁双电梯和换乘。', -300, 322, 18, new Color(225, 220, 211, 230), 600);
+        this.drawText('level-select-desc', '目标从送达人数改为调度分：少绕路、少中途停站、快送达，才能高分通关。', -300, 322, 18, new Color(225, 220, 211, 230), 600);
         const levels = model.levelConfigs.slice(0, 3);
         levels.forEach((level, index) => {
             const y = 255 - index * 82;
@@ -863,7 +855,7 @@ export class GameView implements GameHitAreas {
         this.drawText('start-title', model.currentLevelConfig.title, -245, -230, 28, INK, 490);
         this.drawText(
             'start-desc',
-            `目标：送达 ${model.progress.targetDeliveries} 人 · 电梯 ${model.activeElevatorCount} 台 · 最高分 ${model.economy.bestScore}`,
+            `目标：达到 ${model.progress.targetDeliveries} 分 · 电梯 ${model.activeElevatorCount} 台 · 最高分 ${model.economy.bestScore}`,
             -245,
             -285,
             20,
@@ -1019,6 +1011,19 @@ export class GameView implements GameHitAreas {
                 label.node.active = false;
             }
         });
+    }
+
+    private qualityColor(score: number): Color {
+        if (score >= 90) {
+            return GOLD;
+        }
+        if (score >= 70) {
+            return GREEN;
+        }
+        if (score >= 40) {
+            return BLUE;
+        }
+        return MUTED;
     }
 
     private floorColor(model: GameModel, floor: number): Color {

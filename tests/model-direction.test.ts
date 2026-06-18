@@ -232,12 +232,12 @@ function testPassengerPatienceRestartsInsideElevator(): void {
     assert(passenger.waitElapsed === 0, 'entering the elevator should restart the patience timer');
     assert(passenger.patience === 40, 'entering the elevator should grant a fresh forty-second patience window');
 
-    model.update(19.9);
-    assert(!model.shouldShowPassengerTimer(passenger), 'in-cabin timer should stay hidden before 20 seconds');
+    model.update(39.9);
+    assert(!model.shouldShowPassengerTimer(passenger), 'in-cabin timer should stay hidden before half-speed patience reaches 20 seconds');
     model.update(0.2);
-    assert(model.shouldShowPassengerTimer(passenger), 'in-cabin timer should appear at 20 seconds');
-    model.update(9.9);
-    assert(model.warningFloors.includes(0), 'in-cabin patience warning should start at 30 seconds');
+    assert(model.shouldShowPassengerTimer(passenger), 'in-cabin timer should appear after half-speed patience reaches 20 seconds');
+    model.update(19.9);
+    assert(model.warningFloors.includes(0), 'in-cabin patience warning should start after half-speed patience reaches 30 seconds');
 }
 
 function testAutomaticBoardingCannotSkipQueueHead(): void {
@@ -530,11 +530,16 @@ function testExplicitElevatorQueueSurvivesControlSwitch(): void {
     assert(s1Arrivals.join(',') === '2,4,5,3', 'S1 should continue 2,4,5,3 after S2 is controlled');
 }
 
-function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
+function testDeliveryAddsQualityScore(): void {
     const model = createRunningModel('1-3');
     const passenger = model.createPassenger(0, 1);
     passenger.patience = passenger.maxPatience;
     passenger.state = PassengerState.Riding;
+    passenger.boardFloor = 0;
+    passenger.boardGameTime = model.progress.gameTime;
+    passenger.actualRideDistance = 0;
+    passenger.intermediateStops = 0;
+    passenger.lastElevatorFloor = 0;
     model.elevator.passengers = [passenger.id];
 
     model.queueFloor(1);
@@ -543,11 +548,74 @@ function testDeliveryAddsRunScoreAndMultiplierProgress(): void {
     const deliveredEvents = model.drainDeliveredEvents();
 
     assert(model.economy.delivered === 1, 'delivery should count toward the run');
-    assert(model.economy.score === 30, 'high-patience delivery should score with a 3X multiplier');
-    assert(model.economy.bestScore === 30, 'best score should track the highest run score');
-    assert(model.economy.multiplier === 3, 'high-patience delivery should set the current multiplier to 3X');
-    assert(deliveredEvents[0].multiplier === 3, 'delivery event should expose the floating badge multiplier');
-    assert(deliveredEvents[0].scoreGain === 30, 'delivery event should expose the score gain for UI feedback');
+    assert(model.economy.score >= 95, 'a direct high-patience ride should score near the base quality score');
+    assert(model.economy.bestScore === model.economy.score, 'best score should track the highest run score');
+    assert(deliveredEvents[0].scoreGain === model.economy.score, 'delivery event should expose the quality score gain');
+    assert(deliveredEvents[0].qualityLabel === 'Perfect', 'a clean ride should show a Perfect rating');
+}
+
+function testIntermediateStopLowersQualityScore(): void {
+    const model = createRunningModel('1-3');
+    const passenger = model.createPassenger(0, 2);
+    passenger.patience = passenger.maxPatience;
+    passenger.state = PassengerState.Riding;
+    passenger.boardFloor = 0;
+    passenger.boardGameTime = model.progress.gameTime;
+    passenger.actualRideDistance = 0;
+    passenger.intermediateStops = 0;
+    passenger.lastElevatorFloor = 0;
+    model.elevator.passengers = [passenger.id];
+
+    model.queueFloor(1);
+    model.queueFloor(2);
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (model.economy.delivered === 1) {
+            break;
+        }
+    }
+    const deliveredEvents = model.drainDeliveredEvents();
+
+    assert(passenger.actualRideDistance === 2, 'two-floor direct travel should accumulate two ride distance');
+    assert(passenger.intermediateStops === 1, 'stopping at floor 1 should count as one intermediate stop');
+    assert(deliveredEvents[0].scoreGain < 100, 'intermediate stops should lower the quality score');
+    assert(deliveredEvents[0].qualityLabel === 'Good', 'one efficient intermediate stop should still be rated Good');
+}
+
+function testRidePatienceDecaysSlowerInsideElevator(): void {
+    const model = createRunningModel('1-3');
+    const passenger = model.createPassenger(0, 2);
+    passenger.state = PassengerState.Riding;
+    passenger.boardFloor = 0;
+    passenger.boardGameTime = model.progress.gameTime;
+    passenger.lastElevatorFloor = 0;
+    model.elevator.passengers = [passenger.id];
+
+    model.update(10);
+
+    assert(passenger.waitElapsed === 5, 'riding without stops should decay patience at half speed');
+    assert(passenger.patience === 35, 'riding passenger should retain more patience than waiting passengers');
+}
+
+function testStopsAndDetoursIncreaseRidePatienceDecay(): void {
+    const model = createRunningModel('1-3');
+    const passenger = model.createPassenger(0, 2);
+    passenger.state = PassengerState.Riding;
+    passenger.boardFloor = 0;
+    passenger.boardGameTime = model.progress.gameTime;
+    passenger.lastElevatorFloor = 0;
+    passenger.intermediateStops = 2;
+    passenger.frustration = 2;
+    passenger.actualRideDistance = 5;
+    model.elevator.passengers = [passenger.id];
+
+    model.update(10);
+
+    assert(
+        Math.abs(passenger.waitElapsed - 9.5) < 0.001,
+        'two stops plus three extra detour floors should decay at 0.95x speed',
+    );
+    assert(Math.abs(passenger.patience - 30.5) < 0.001, 'detour frustration should reduce remaining patience');
 }
 
 function testPassengerDestinationColorStaysStableWhileBoarding(): void {
@@ -653,7 +721,10 @@ testFloorExtensionHasNoArtificialSixFloorCap();
 testSecondElevatorTakesOverflowWhenBothCabinsShareFloor();
 testFloorCommandsStayOnExplicitElevator();
 testExplicitElevatorQueueSurvivesControlSwitch();
-testDeliveryAddsRunScoreAndMultiplierProgress();
+testDeliveryAddsQualityScore();
+testIntermediateStopLowersQualityScore();
+testRidePatienceDecaysSlowerInsideElevator();
+testStopsAndDetoursIncreaseRidePatienceDecay();
 testPassengerDestinationColorStaysStableWhileBoarding();
 testFloorTypesAndRushWarnings();
 testRushEventGeneratesTypedPassengerRequests();

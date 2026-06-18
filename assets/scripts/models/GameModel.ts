@@ -33,7 +33,19 @@ const PATIENCE_WARNING_RATIO = 0.75;
 const WARNING_SOUND_INTERVAL = 0.8;
 const ELEVATOR_COUNT = 2;
 const ELEVATOR_CAPACITY = 5;
-const DELIVERY_SCORE_BASE = 10;
+const BASE_SCORE = 100;
+const MIN_PATIENCE_FACTOR = 0.5;
+const MIN_ROUTE_FACTOR = 0.3;
+const MIN_TIME_FACTOR = 0.4;
+const STOP_PENALTY_RATE = 0.15;
+const TIME_PER_FLOOR = 5;
+const STOP_TIME = 5;
+const WAITING_PATIENCE_DECAY_RATE = 1;
+const IN_ELEVATOR_PATIENCE_DECAY_RATE = 0.5;
+const INTERMEDIATE_STOP_DECAY_PENALTY = 0.15;
+const DETOUR_DECAY_PENALTY_PER_FLOOR = 0.05;
+const MIN_RIDE_DECAY_RATE = 0.5;
+const MAX_RIDE_DECAY_RATE = 1.5;
 
 interface DifficultyConfig {
     maxLevel: number;
@@ -86,7 +98,7 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         id: '1-1',
         chapter: '第 1 章 基础教学',
         title: '1-1 第一台电梯',
-        description: '点击楼层派出电梯，到达后点击轿厢让乘客上车。',
+        description: '点击楼层派出电梯，到达后点击轿厢让乘客上车，尽量少绕路。',
         floors: [0, 1, 2, 3, 4],
         elevators: 1,
         floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office' },
@@ -103,14 +115,14 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         },
         rushEvents: [],
         enabledSystems: [],
-        winCondition: { type: 'deliverCount', value: 10 },
+        winCondition: { type: 'score', value: 500 },
         failCondition: { type: 'lostPassengers', max: 999 },
     },
     {
         id: '1-2',
         chapter: '第 1 章 基础教学',
-        title: '1-2 耐心系统',
-        description: '乘客等待会消耗耐心，红圈乘客需要优先处理。',
+        title: '1-2 耐心与效率',
+        description: '乘客等待会消耗耐心，高耐心、少停站能拿更高调度分。',
         floors: [0, 1, 2, 3, 4, 5],
         elevators: 1,
         floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office', 5: 'office' },
@@ -127,14 +139,14 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         },
         rushEvents: [],
         enabledSystems: ['patience'],
-        winCondition: { type: 'deliverCount', value: 14 },
+        winCondition: { type: 'score', value: 850 },
         failCondition: { type: 'lostPassengers', max: 0 },
     },
     {
         id: '1-3',
         chapter: '第 1 章 基础教学',
-        title: '1-3 倍数系统',
-        description: '高耐心送达会获得 2X / 3X 分数，争取快速送达。',
+        title: '1-3 调度评分',
+        description: '关卡目标改为高分通关：少绕路、少中停、快送达。',
         floors: [0, 1, 2, 3, 4, 5, 6],
         elevators: 1,
         floorTypes: { 0: 'ground', 1: 'office', 2: 'office', 3: 'office', 4: 'office', 5: 'office', 6: 'office' },
@@ -150,8 +162,8 @@ const LEVEL_CONFIGS: LevelConfig[] = [
             maxWaitingPassengers: 16,
         },
         rushEvents: [],
-        enabledSystems: ['patience', 'multiplier'],
-        winCondition: { type: 'deliverCount', value: 18 },
+        enabledSystems: ['patience', 'qualityScore'],
+        winCondition: { type: 'score', value: 1200 },
         failCondition: { type: 'lostPassengers', max: 0 },
     },
     {
@@ -184,8 +196,8 @@ const LEVEL_CONFIGS: LevelConfig[] = [
             maxWaitingPassengers: 20,
         },
         rushEvents: [],
-        enabledSystems: ['patience', 'multiplier', 'multiElevator'],
-        winCondition: { type: 'deliverCount', value: 24 },
+        enabledSystems: ['patience', 'qualityScore', 'multiElevator'],
+        winCondition: { type: 'score', value: 1800 },
         failCondition: { type: 'lostPassengers', max: 1 },
     },
 ];
@@ -227,8 +239,6 @@ export class GameModel {
         bestScore: 0,
         delivered: 0,
         lost: 0,
-        multiplier: 1,
-        multiplierProgress: 0,
     };
     readonly progress: ProgressModel = {
         day: 1,
@@ -393,6 +403,9 @@ export class GameModel {
             originFloor,
             destinationFloor,
             destinationColorIndex: this.getFloorColorIndex(destinationFloor),
+            actualRideDistance: 0,
+            intermediateStops: 0,
+            frustration: 0,
             waitElapsed: 0,
             patience: maxPatience,
             maxPatience,
@@ -735,8 +748,6 @@ export class GameModel {
         this.economy.score = 0;
         this.economy.delivered = 0;
         this.economy.lost = 0;
-        this.economy.multiplier = 1;
-        this.economy.multiplierProgress = 0;
         this.progress.elapsedSeconds = 0;
         this.progress.gameTime = START_TIME;
         this.progress.started = false;
@@ -755,8 +766,6 @@ export class GameModel {
         this.economy.delivered = 0;
         this.economy.lost = 0;
         this.economy.score = 0;
-        this.economy.multiplier = 1;
-        this.economy.multiplierProgress = 0;
         this.progress.elapsedSeconds = 0;
         this.progress.gameTime = START_TIME;
         this.progress.started = false;
@@ -776,8 +785,6 @@ export class GameModel {
         this.economy.bestScore = 0;
         this.economy.delivered = 0;
         this.economy.lost = 0;
-        this.economy.multiplier = 1;
-        this.economy.multiplierProgress = 0;
         this.progress.day = 1;
         this.progress.level = 1;
         this.progress.currentLevelId = '1-1';
@@ -797,7 +804,8 @@ export class GameModel {
 
     private updatePatience(deltaTime: number, state: PassengerState): void {
         for (const passenger of this.passengers.filter((candidate) => candidate.state === state)) {
-            passenger.waitElapsed += deltaTime;
+            const decayRate = this.getPatienceDecayRate(passenger, state);
+            passenger.waitElapsed += deltaTime * decayRate;
             passenger.patience = Math.max(0, passenger.maxPatience - passenger.waitElapsed);
             if (passenger.waitElapsed < passenger.maxPatience) {
                 continue;
@@ -805,8 +813,6 @@ export class GameModel {
             passenger.patience = 0;
             passenger.state = PassengerState.Lost;
             this.economy.lost += 1;
-            this.economy.multiplier = 1;
-            this.economy.multiplierProgress = 0;
             this.progress.failed = this.economy.lost > this.currentLevelConfig.failCondition.max;
             return;
         }
@@ -936,15 +942,18 @@ export class GameModel {
         if (Math.abs(difference) > Math.abs(step)) {
             elevator.position += step;
             elevator.doorOpen = false;
+            this.accumulateRideDistance(elevatorIndex);
             return;
         }
 
         const arrivalDirection = elevator.direction;
         elevator.position = elevator.targetFloor;
+        this.accumulateRideDistance(elevatorIndex);
         elevator.currentFloor = elevator.targetFloor;
         elevator.targetFloor = null;
         elevator.direction = ElevatorDirection.Idle;
         elevator.doorOpen = true;
+        this.recordIntermediateStop(elevatorIndex);
         if (!this.beginUnloadingAtCurrentFloor(elevatorIndex, arrivalDirection)) {
             this.boardForOnwardDirection(elevatorIndex);
         }
@@ -966,7 +975,14 @@ export class GameModel {
             }
             passenger.state = PassengerState.Riding;
             this.resetPassengerPatience(passenger);
-            this.elevators[elevatorIndex].passengers.push(passenger.id);
+            const elevator = this.elevators[elevatorIndex];
+            passenger.boardFloor = passenger.originFloor;
+            passenger.boardGameTime = this.progress.gameTime;
+            passenger.actualRideDistance = 0;
+            passenger.intermediateStops = 0;
+            passenger.frustration = 0;
+            passenger.lastElevatorFloor = elevator.currentFloor;
+            elevator.passengers.push(passenger.id);
             this.boardedEvents.push({
                 passengerId: passenger.id,
                 destinationFloor: passenger.destinationFloor,
@@ -1015,27 +1031,18 @@ export class GameModel {
             passenger.state = PassengerState.Delivered;
             const elevator = this.elevators[elevatorIndex];
             elevator.passengers = elevator.passengers.filter((id) => id !== passenger.id);
-            const patienceRatio = passenger.patience / passenger.maxPatience;
-            const deliveryMultiplier = !this.isSystemEnabled('multiplier')
-                ? 1
-                : patienceRatio >= 0.8
-                ? 3
-                : patienceRatio >= 0.5
-                    ? 2
-                    : 1;
-            this.economy.multiplier = deliveryMultiplier;
-            this.economy.multiplierProgress = 0;
+            const quality = this.calculatePassengerQualityScore(passenger);
             this.economy.delivered += 1;
-            this.economy.coins += deliveryMultiplier;
-            const scoreGain = DELIVERY_SCORE_BASE * deliveryMultiplier;
+            this.economy.coins += Math.max(1, Math.round(quality.score / 50));
+            const scoreGain = quality.score;
             this.economy.score += scoreGain;
             this.economy.bestScore = Math.max(this.economy.bestScore, this.economy.score);
             this.stopDeliveredCounts[elevatorIndex] += 1;
             this.deliveredEvents.push({
                 passengerId: passenger.id,
                 floor: elevator.currentFloor,
-                multiplier: deliveryMultiplier,
                 scoreGain,
+                qualityLabel: quality.label,
                 stopDeliveredCount: this.stopDeliveredCounts[elevatorIndex],
                 totalDelivered: this.economy.delivered,
                 elevatorIndex,
@@ -1056,6 +1063,105 @@ export class GameModel {
         this.boardPassengersAtCurrentFloor(elevatorIndex, (passenger) => {
             return Math.sign(passenger.destinationFloor - passenger.originFloor) === direction;
         });
+    }
+
+    private accumulateRideDistance(elevatorIndex: number): void {
+        const elevator = this.elevators[elevatorIndex];
+        elevator.passengers.forEach((id) => {
+            const passenger = this.getPassenger(id);
+            if (!passenger || passenger.state !== PassengerState.Riding) {
+                return;
+            }
+            passenger.lastElevatorFloor ??= elevator.currentFloor;
+            if (elevator.direction === ElevatorDirection.Up) {
+                const crossedFloor = Math.floor(elevator.position);
+                while ((passenger.lastElevatorFloor ?? elevator.currentFloor) < crossedFloor) {
+                    passenger.lastElevatorFloor = (passenger.lastElevatorFloor ?? elevator.currentFloor) + 1;
+                    passenger.actualRideDistance += 1;
+                }
+            } else if (elevator.direction === ElevatorDirection.Down) {
+                const crossedFloor = Math.ceil(elevator.position);
+                while ((passenger.lastElevatorFloor ?? elevator.currentFloor) > crossedFloor) {
+                    passenger.lastElevatorFloor = (passenger.lastElevatorFloor ?? elevator.currentFloor) - 1;
+                    passenger.actualRideDistance += 1;
+                }
+            }
+        });
+    }
+
+    private recordIntermediateStop(elevatorIndex: number): void {
+        const elevator = this.elevators[elevatorIndex];
+        elevator.passengers.forEach((id) => {
+            const passenger = this.getPassenger(id);
+            if (!passenger || passenger.state !== PassengerState.Riding) {
+                return;
+            }
+            if (elevator.currentFloor === passenger.destinationFloor || elevator.currentFloor === passenger.boardFloor) {
+                return;
+            }
+            passenger.intermediateStops += 1;
+            passenger.frustration += 1;
+        });
+    }
+
+    private getPatienceDecayRate(passenger: PassengerModel, state: PassengerState): number {
+        if (state === PassengerState.Waiting || state === PassengerState.Boarding) {
+            return WAITING_PATIENCE_DECAY_RATE;
+        }
+        if (state === PassengerState.Riding || state === PassengerState.Exiting) {
+            const boardFloor = passenger.boardFloor ?? passenger.originFloor;
+            const shortestDistance = Math.abs(passenger.destinationFloor - boardFloor);
+            const extraDistance = Math.max(0, passenger.actualRideDistance - shortestDistance);
+            const detourPenalty = extraDistance * DETOUR_DECAY_PENALTY_PER_FLOOR;
+            const rideDecayRate = IN_ELEVATOR_PATIENCE_DECAY_RATE
+                + passenger.intermediateStops * INTERMEDIATE_STOP_DECAY_PENALTY
+                + detourPenalty;
+            return this.clamp(rideDecayRate, MIN_RIDE_DECAY_RATE, MAX_RIDE_DECAY_RATE);
+        }
+        return WAITING_PATIENCE_DECAY_RATE;
+    }
+
+    private calculatePassengerQualityScore(passenger: PassengerModel): { score: number; label: string } {
+        const boardFloor = passenger.boardFloor ?? passenger.originFloor;
+        const boardGameTime = passenger.boardGameTime ?? this.progress.gameTime;
+        const shortestDistance = Math.abs(passenger.destinationFloor - boardFloor);
+        const actualRideTime = Math.max(this.progress.gameTime - boardGameTime, 0);
+        const patienceRatio = this.clamp(passenger.patience / passenger.maxPatience, 0, 1);
+        const patienceFactor = MIN_PATIENCE_FACTOR + (1 - MIN_PATIENCE_FACTOR) * patienceRatio;
+        const safeActualDistance = Math.max(passenger.actualRideDistance, shortestDistance, 1);
+        const routeEfficiencyFactor = this.clamp(shortestDistance / safeActualDistance, MIN_ROUTE_FACTOR, 1);
+        const idealRideTime = shortestDistance * TIME_PER_FLOOR + STOP_TIME;
+        const safeActualRideTime = Math.max(actualRideTime, idealRideTime, 1);
+        const timeEfficiencyFactor = this.clamp(idealRideTime / safeActualRideTime, MIN_TIME_FACTOR, 1);
+        const stopFactor = 1 / (1 + passenger.intermediateStops * STOP_PENALTY_RATE);
+        const score = Math.round(
+            BASE_SCORE
+            * patienceFactor
+            * routeEfficiencyFactor
+            * timeEfficiencyFactor
+            * stopFactor,
+        );
+        return {
+            score,
+            label: this.qualityLabelForScore(score),
+        };
+    }
+
+    private qualityLabelForScore(score: number): string {
+        if (score >= 90) {
+            return 'Perfect';
+        }
+        if (score >= 70) {
+            return 'Good';
+        }
+        if (score >= 40) {
+            return 'Slow';
+        }
+        return 'okey';
+    }
+
+    private clamp(value: number, min: number, max: number): number {
+        return Math.max(min, Math.min(max, value));
     }
 
     private getOnwardDirection(elevatorIndex: number): ElevatorDirection {
@@ -1110,8 +1216,7 @@ export class GameModel {
     }
 
     private calculateLevelStars(): number {
-        const perfectScoreTarget = this.currentLevelConfig.winCondition.value
-            * (this.isSystemEnabled('multiplier') ? DELIVERY_SCORE_BASE * 2 : DELIVERY_SCORE_BASE);
+        const perfectScoreTarget = this.currentLevelConfig.winCondition.value;
         if (this.economy.lost === 0 && this.economy.score >= perfectScoreTarget) {
             return 3;
         }
@@ -1222,8 +1327,6 @@ export class GameModel {
         this.economy.delivered = 0;
         this.economy.lost = 0;
         this.economy.score = 0;
-        this.economy.multiplier = 1;
-        this.economy.multiplierProgress = 0;
         this.resetTraffic();
     }
 

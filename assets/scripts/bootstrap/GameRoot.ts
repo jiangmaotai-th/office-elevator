@@ -58,7 +58,9 @@ export class GameRoot extends Component {
     }
 
     update(deltaTime: number): void {
-        this.controller?.update(Math.min(deltaTime, 0.1));
+        const safeDeltaTime = Math.min(deltaTime, 0.1);
+        this.controller?.update(safeDeltaTime);
+        this.audioManager?.update(safeDeltaTime);
     }
 
     onDestroy(): void {
