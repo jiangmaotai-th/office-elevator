@@ -262,7 +262,7 @@ export class GameView implements GameHitAreas {
     }
 
     isStartButton(position: Vec3): boolean {
-        return position.x > -105 && position.x < 135 && position.y > -560 && position.y < -480;
+        return position.x > -105 && position.x < 135 && position.y > -255 && position.y < -185;
     }
 
     isMenuButton(position: Vec3): boolean {
@@ -960,25 +960,29 @@ export class GameView implements GameHitAreas {
     }
 
     private drawStartPrompt(model: GameModel): void {
-        this.graphics.fillColor = new Color(247, 242, 234, 218);
-        this.graphics.roundRect(-310, -360, 620, 170, 8);
+        this.graphics.fillColor = new Color(12, 13, 15, 165);
+        this.graphics.rect(-360, -640, 720, 1280);
         this.graphics.fill();
-        this.strokeRect(-310, -360, 620, 170, INK, 2);
-        this.drawText('start-title', `教学说明：${model.currentLevelConfig.title}`, -285, -220, 25, INK, 560);
+        this.graphics.fillColor = new Color(247, 242, 234, 246);
+        this.graphics.roundRect(-310, -305, 620, 340, 12);
+        this.graphics.fill();
+        this.strokeRect(-310, -305, 620, 340, INK, 3);
+        this.drawText('start-title', `教学说明：${model.currentLevelConfig.title}`, -275, -20, 27, INK, 540);
         this.drawText(
             'start-desc',
-            `${model.currentLevelConfig.tutorialText ?? model.currentLevelConfig.description}\n目标：达到 ${model.progress.targetDeliveries} 分 · 电梯 ${model.activeElevatorCount} 台`,
-            -285,
-            -292,
-            18,
+            `${model.currentLevelConfig.tutorialText ?? model.currentLevelConfig.description}\n\n先从少量乘客热身，随后关卡会刷出本关主题事件。\n目标：达到 ${model.progress.targetDeliveries} 分 · 电梯 ${model.activeElevatorCount} 台`,
+            -275,
+            -125,
+            19,
             MUTED,
-            560,
+            540,
         );
         this.graphics.fillColor = INK;
-        this.graphics.roundRect(-105, -560, 240, 80, 5);
+        this.graphics.roundRect(-105, -255, 240, 70, 6);
         this.graphics.fill();
         this.labels.start.node.active = true;
         this.labels.start.color = PAPER;
+        this.labels.start.node.setPosition(new Vec3(-100, -220));
         this.labels.start.string = '确定开始';
     }
 

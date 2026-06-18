@@ -798,20 +798,31 @@ function testTeachingLevelsSpawnThemePassengersOnStart(): void {
     const model = new GameModel();
     model.loadLevel('1-4');
     model.startRun();
-    const capacityRequests = model.drainTrafficSpawnRequests();
+    const warmupRequests = model.drainTrafficSpawnRequests();
 
-    assert(capacityRequests.length === 7, 'capacity lesson should start with more passengers than one cabin can hold');
+    assert(warmupRequests.length === 2, 'capacity lesson should start with a gentle warmup queue');
     assert(
-        capacityRequests.every((request) => request.originFloor === 0 && request.destinationFloor === 5),
+        warmupRequests.every((request) => request.originFloor === 0 && request.destinationFloor === 5),
+        'capacity warmup should still point at the lesson route',
+    );
+
+    model.update(10);
+    const capacityThemeRequests = model.drainTrafficSpawnRequests();
+    assert(capacityThemeRequests.length >= 7, 'capacity lesson should later show more passengers than one cabin can hold');
+    assert(
+        capacityThemeRequests.slice(0, 7).every((request) => request.originFloor === 0 && request.destinationFloor === 5),
         'capacity lesson should show one floor queue overflowing a five-person cabin',
     );
 
     model.loadLevel('4-3');
     model.startRun();
+    const transferWarmupRequests = model.drainTrafficSpawnRequests();
+    assert(transferWarmupRequests.length === 3, 'transfer capacity lesson should start with a manageable warmup route');
+    model.update(10);
     const transferCapacityRequests = model.drainTrafficSpawnRequests();
-    assert(transferCapacityRequests.length === 9, 'transfer capacity lesson should start with a crowded transfer route');
+    assert(transferCapacityRequests.length >= 9, 'transfer capacity lesson should later show a crowded transfer route');
     assert(
-        transferCapacityRequests.every((request) => request.originFloor === 0 && request.destinationFloor === 5),
+        transferCapacityRequests.slice(0, 9).every((request) => request.originFloor === 0 && request.destinationFloor === 5),
         'transfer capacity lesson should force low-to-high transfer pressure',
     );
 }

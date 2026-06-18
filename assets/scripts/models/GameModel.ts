@@ -607,10 +607,46 @@ function traffic(originFloor: number, destinationFloor: number, amount: number):
     return Array.from({ length: amount }, () => ({ originFloor, destinationFloor }));
 }
 
-function initialTrafficForLevel(levelId: string): TrafficSpawnRequest[] {
+function warmupTrafficForLevel(levelId: string): TrafficSpawnRequest[] {
     const presets: Record<string, TrafficSpawnRequest[]> = {
-        '1-1': traffic(0, 2, 2),
-        '1-2': [...traffic(0, 3, 1), ...traffic(1, 4, 1)],
+        '1-1': traffic(0, 2, 1),
+        '1-2': traffic(0, 3, 1),
+        '1-3': traffic(0, 2, 1),
+        '1-4': traffic(0, 5, 2),
+        '1-5': traffic(0, 2, 1),
+        '1-6': [...traffic(0, 5, 1), ...traffic(2, 0, 1)],
+        '2-1': traffic(0, 4, 1),
+        '2-2': traffic(0, 5, 1),
+        '2-3': traffic(0, 5, 1),
+        '2-4': traffic(0, 5, 1),
+        '2-5': [...traffic(0, 5, 1), ...traffic(5, 0, 1)],
+        '2-6': [...traffic(0, 5, 1), ...traffic(2, 4, 1)],
+        '3-1': traffic(0, 4, 2),
+        '3-2': [...traffic(0, 2, 1), ...traffic(0, 5, 1)],
+        '3-3': traffic(0, 5, 3),
+        '3-4': [...traffic(0, 5, 1), ...traffic(5, 0, 1)],
+        '3-5': [...traffic(0, 5, 1), ...traffic(1, 4, 1)],
+        '3-6': [...traffic(0, 5, 2), ...traffic(5, 0, 1)],
+        '4-1': traffic(0, 5, 1),
+        '4-2': traffic(0, 5, 2),
+        '4-3': traffic(0, 5, 3),
+        '4-4': [...traffic(0, 5, 1), ...traffic(5, 0, 1)],
+        '4-5': traffic(0, 5, 2),
+        '4-6': [...traffic(0, 5, 2), ...traffic(5, 0, 1)],
+        '5-1': traffic(0, 5, 2),
+        '5-2': [...traffic(4, 1, 1), ...traffic(1, 5, 1)],
+        '5-3': traffic(-1, 4, 2),
+        '5-4': [...traffic(4, 0, 1), ...traffic(3, -1, 1)],
+        '5-5': [...traffic(0, 4, 1), ...traffic(-1, 3, 1)],
+        '5-6': [...traffic(0, 4, 2), ...traffic(-1, 3, 1)],
+    };
+    return presets[levelId] ?? [];
+}
+
+function themeTrafficForLevel(levelId: string): TrafficSpawnRequest[] {
+    const presets: Record<string, TrafficSpawnRequest[]> = {
+        '1-1': traffic(0, 2, 1),
+        '1-2': traffic(1, 4, 1),
         '1-3': [...traffic(0, 2, 2), ...traffic(0, 4, 1)],
         '1-4': traffic(0, 5, 7),
         '1-5': [...traffic(0, 2, 1), ...traffic(0, 4, 1), ...traffic(0, 1, 1), ...traffic(0, 5, 1)],
@@ -641,6 +677,10 @@ function initialTrafficForLevel(levelId: string): TrafficSpawnRequest[] {
         '5-6': [...traffic(0, 4, 5), ...traffic(-1, 3, 5), ...traffic(4, 1, 4), ...traffic(3, 2, 3)],
     };
     return presets[levelId] ?? [];
+}
+
+function themeTrafficDelayForLevel(levelId: string): number {
+    return levelId.endsWith('-1') ? 8 : 10;
 }
 
 export class GameModel {
@@ -717,6 +757,7 @@ export class GameModel {
     private ambientTrafficTimer = 0;
     private nextAmbientTrafficDelaySeconds = DIFFICULTY_STAGES[0].ambientFirstDelaySeconds;
     private smallQueueTimer = 0;
+    private themeTrafficSpawned = false;
     private readonly levelResults = new Map<string, LevelResult>();
     private readonly floorTypeOverrides = new Map<number, FloorType>([
         [-2, 'parking'],
@@ -1193,7 +1234,7 @@ export class GameModel {
         if (this.progress.started || this.progress.completed || this.progress.failed) {
             return;
         }
-        this.trafficSpawnRequests.push(...initialTrafficForLevel(this.currentLevelConfig.id));
+        this.trafficSpawnRequests.push(...warmupTrafficForLevel(this.currentLevelConfig.id));
         this.progress.started = true;
     }
 
@@ -1372,6 +1413,10 @@ export class GameModel {
 
     private updateTraffic(gameMinutes: number, deltaTime: number): void {
         let spawnedRush = false;
+        if (!this.themeTrafficSpawned && this.progress.elapsedSeconds >= themeTrafficDelayForLevel(this.currentLevelConfig.id)) {
+            this.trafficSpawnRequests.push(...themeTrafficForLevel(this.currentLevelConfig.id));
+            this.themeTrafficSpawned = true;
+        }
         this.rushEvents.forEach((event) => {
             if (event.triggered || this.progress.gameTime < event.time) {
                 return;
@@ -1904,6 +1949,7 @@ export class GameModel {
         this.ambientTrafficTimer = 0;
         this.nextAmbientTrafficDelaySeconds = this.currentLevelConfig.passengerSpawnRules.ambientFirstDelaySeconds;
         this.smallQueueTimer = 0;
+        this.themeTrafficSpawned = false;
     }
 
     private resetElevatorAndQueues(): void {
