@@ -212,10 +212,10 @@ export class GameView implements GameHitAreas {
         if (model.progress.started || model.progress.completed || model.progress.failed) {
             return null;
         }
-        const levels = model.levelConfigs.slice(0, 3);
+        const levels = model.levelConfigs;
         for (let index = 0; index < levels.length; index += 1) {
-            const y = 255 - index * 82;
-            if (position.x > -310 && position.x < 310 && position.y > y - 32 && position.y < y + 32) {
+            const y = 262 - index * 58;
+            if (position.x > -310 && position.x < 310 && position.y > y - 24 && position.y < y + 24) {
                 return levels[index].id;
             }
         }
@@ -816,31 +816,31 @@ export class GameView implements GameHitAreas {
 
     private drawLevelSelect(model: GameModel): void {
         this.graphics.fillColor = new Color(24, 26, 29, 232);
-        this.graphics.roundRect(-330, 58, 660, 335, 10);
+        this.graphics.roundRect(-330, 45, 660, 348, 10);
         this.graphics.fill();
-        this.strokeRect(-330, 58, 660, 335, new Color(247, 242, 234, 170), 2);
-        this.drawText('level-select-title', '选择基础关卡', -300, 360, 28, PAPER, 240);
-        this.drawText('level-select-desc', '目标从送达人数改为调度分：少绕路、少中途停站、快送达，才能高分通关。', -300, 322, 18, new Color(225, 220, 211, 230), 600);
-        const levels = model.levelConfigs.slice(0, 3);
+        this.strokeRect(-330, 45, 660, 348, new Color(247, 242, 234, 170), 2);
+        this.drawText('level-select-title', '选择关卡', -300, 360, 28, PAPER, 240);
+        this.drawText('level-select-desc', '从单电梯教学到双电梯、中转层，逐步练调度分。', -300, 324, 18, new Color(225, 220, 211, 230), 600);
+        const levels = model.levelConfigs;
         levels.forEach((level, index) => {
-            const y = 255 - index * 82;
+            const y = 262 - index * 58;
             const selected = level.id === model.currentLevelConfig.id;
             this.graphics.fillColor = selected
                 ? new Color(247, 242, 234, 238)
                 : new Color(247, 242, 234, 185);
-            this.graphics.roundRect(-310, y - 32, 620, 64, 7);
+            this.graphics.roundRect(-310, y - 24, 620, 48, 7);
             this.graphics.fill();
-            this.strokeRect(-310, y - 32, 620, 64, selected ? GOLD : new Color(110, 108, 102, 210), selected ? 3 : 2);
-            this.drawText(`level-card-id-${level.id}`, level.id, -286, y + 12, 21, selected ? INK : MUTED, 62);
-            this.drawText(`level-card-title-${level.id}`, level.title.replace(/^1-\d\s*/, ''), -218, y + 13, 22, INK, 220);
-            this.drawText(`level-card-desc-${level.id}`, level.description, -218, y - 13, 15, MUTED, 370);
+            this.strokeRect(-310, y - 24, 620, 48, selected ? GOLD : new Color(110, 108, 102, 210), selected ? 3 : 2);
+            this.drawText(`level-card-id-${level.id}`, level.id, -286, y + 8, 19, selected ? INK : MUTED, 62);
+            this.drawText(`level-card-title-${level.id}`, level.title.replace(/^\d-\d\s*/, ''), -218, y + 9, 19, INK, 250);
+            this.drawText(`level-card-desc-${level.id}`, level.description, -218, y - 12, 13, MUTED, 390);
             const stars = model.getLevelStars(level.id);
             this.drawText(
                 `level-card-stars-${level.id}`,
                 stars > 0 ? '★'.repeat(stars) : '未通关',
                 210,
                 y,
-                19,
+                17,
                 stars > 0 ? GOLD : MUTED,
                 90,
             );
@@ -922,7 +922,7 @@ export class GameView implements GameHitAreas {
         this.graphics.fill();
         this.labels.restart.node.active = true;
         this.labels.restart.color = PAPER;
-        const levelIds = model.levelConfigs.slice(0, 3).map((level) => level.id);
+        const levelIds = model.levelConfigs.map((level) => level.id);
         const hasNextLevel = levelIds.indexOf(model.currentLevelConfig.id) >= 0
             && levelIds.indexOf(model.currentLevelConfig.id) < levelIds.length - 1;
         this.labels.restart.string = hasNextLevel ? '下一关' : '返回选关';

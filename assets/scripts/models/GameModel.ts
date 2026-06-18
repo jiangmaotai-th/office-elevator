@@ -200,6 +200,43 @@ const LEVEL_CONFIGS: LevelConfig[] = [
         winCondition: { type: 'score', value: 1800 },
         failCondition: { type: 'lostPassengers', max: 1 },
     },
+    {
+        id: '4-1',
+        chapter: '第 4 章 空中大堂',
+        title: '4-1 第一次换乘',
+        description: '低区电梯到 10F，中转后换乘高区电梯去高层。',
+        floors: Array.from({ length: 21 }, (_value, index) => index),
+        elevators: 2,
+        elevatorServiceRanges: [
+            { min: 0, max: 10 },
+            { min: 10, max: 20 },
+        ],
+        transferFloor: 10,
+        floorTypes: {
+            0: 'ground',
+            10: 'rest',
+            16: 'office',
+            17: 'office',
+            18: 'office',
+            19: 'office',
+            20: 'office',
+        },
+        passengerSpawnRules: {
+            ambientFirstDelaySeconds: 2,
+            ambientMinIntervalSeconds: 6,
+            ambientMaxIntervalSeconds: 10,
+            ambientMin: 1,
+            ambientMax: 2,
+            smallQueueIntervalSeconds: 35,
+            smallQueueMin: 3,
+            smallQueueMax: 4,
+            maxWaitingPassengers: 24,
+        },
+        rushEvents: [],
+        enabledSystems: ['patience', 'qualityScore', 'multiElevator', 'transfer'],
+        winCondition: { type: 'score', value: 1500 },
+        failCondition: { type: 'lostPassengers', max: 2 },
+    },
 ];
 
 export class GameModel {
@@ -398,11 +435,16 @@ export class GameModel {
 
     createPassenger(originFloor: number, destinationFloor: number): PassengerModel {
         const maxPatience = this.maxPassengerPatience;
+        const finalDestinationFloor = destinationFloor;
+        const transferFloor = this.getRequiredTransferFloor(originFloor, destinationFloor);
+        const firstLegDestination = transferFloor ?? destinationFloor;
         const passenger: PassengerModel = {
             id: this.nextPassengerId++,
             originFloor,
-            destinationFloor,
-            destinationColorIndex: this.getFloorColorIndex(destinationFloor),
+            destinationFloor: firstLegDestination,
+            finalDestinationFloor,
+            transferFloor,
+            destinationColorIndex: this.getFloorColorIndex(finalDestinationFloor),
             actualRideDistance: 0,
             intermediateStops: 0,
             frustration: 0,
@@ -600,6 +642,60 @@ export class GameModel {
             .filter((floor) => this.isFloorUnlocked(floor) && this.getFloorType(floor) === type);
     }
 
+    private canElevatorServeFloor(elevator: ElevatorModel, floor: number): boolean {
+        const min = elevator.serviceMinFloor;
+        const max = elevator.serviceMaxFloor;
+        if (min === undefined || max === undefined) {
+            return true;
+        }
+        return floor >= min && floor <= max;
+    }
+
+    private getRequiredTransferFloor(originFloor: number, destinationFloor: number): number | undefined {
+        const transferFloor = this.currentLevelConfig.transferFloor;
+        if (!this.isSystemEnabled('transfer') || transferFloor === undefined) {
+            return undefined;
+        }
+        if (originFloor === transferFloor || destinationFloor === transferFloor) {
+            return undefined;
+        }
+        const activeElevators = this.elevators.slice(0, this.activeElevatorCount);
+        const hasDirectElevator = activeElevators.some((elevator) => {
+            return this.canElevatorServeFloor(elevator, originFloor)
+                && this.canElevatorServeFloor(elevator, destinationFloor);
+        });
+        if (hasDirectElevator) {
+            return undefined;
+        }
+        const canReachTransfer = activeElevators.some((elevator) => {
+            return this.canElevatorServeFloor(elevator, originFloor)
+                && this.canElevatorServeFloor(elevator, transferFloor);
+        });
+        const transferCanReachDestination = activeElevators.some((elevator) => {
+            return this.canElevatorServeFloor(elevator, transferFloor)
+                && this.canElevatorServeFloor(elevator, destinationFloor);
+        });
+        return canReachTransfer && transferCanReachDestination ? transferFloor : undefined;
+    }
+
+    private continuePassengerAfterTransfer(passenger: PassengerModel, currentFloor: number): boolean {
+        if (passenger.transferFloor === undefined || currentFloor !== passenger.transferFloor) {
+            return false;
+        }
+        passenger.state = PassengerState.Waiting;
+        passenger.originFloor = currentFloor;
+        passenger.destinationFloor = passenger.finalDestinationFloor;
+        passenger.transferFloor = undefined;
+        passenger.boardFloor = undefined;
+        passenger.boardGameTime = undefined;
+        passenger.actualRideDistance = 0;
+        passenger.intermediateStops = 0;
+        passenger.frustration = 0;
+        passenger.lastElevatorFloor = undefined;
+        this.resetPassengerPatience(passenger);
+        return true;
+    }
+
     getUpcomingRushEvents(limit = 2): RushWarningModel[] {
         if (!this.isSystemEnabled('rushWarning')) {
             return [];
@@ -629,6 +725,9 @@ export class GameModel {
             return false;
         }
         if (!elevator) {
+            return false;
+        }
+        if (!this.canElevatorServeFloor(elevator, floor)) {
             return false;
         }
         if (elevator.targetFloor === null && floor === elevator.currentFloor) {
@@ -1028,9 +1127,12 @@ export class GameModel {
             if (!passenger || passenger.state !== PassengerState.Exiting) {
                 continue;
             }
-            passenger.state = PassengerState.Delivered;
             const elevator = this.elevators[elevatorIndex];
             elevator.passengers = elevator.passengers.filter((id) => id !== passenger.id);
+            if (this.continuePassengerAfterTransfer(passenger, elevator.currentFloor)) {
+                continue;
+            }
+            passenger.state = PassengerState.Delivered;
             const quality = this.calculatePassengerQualityScore(passenger);
             this.economy.delivered += 1;
             this.economy.coins += Math.max(1, Math.round(quality.score / 50));
@@ -1124,7 +1226,7 @@ export class GameModel {
     private calculatePassengerQualityScore(passenger: PassengerModel): { score: number; label: string } {
         const boardFloor = passenger.boardFloor ?? passenger.originFloor;
         const boardGameTime = passenger.boardGameTime ?? this.progress.gameTime;
-        const shortestDistance = Math.abs(passenger.destinationFloor - boardFloor);
+        const shortestDistance = Math.abs(passenger.finalDestinationFloor - boardFloor);
         const actualRideTime = Math.max(this.progress.gameTime - boardGameTime, 0);
         const patienceRatio = this.clamp(passenger.patience / passenger.maxPatience, 0, 1);
         const patienceFactor = MIN_PATIENCE_FACTOR + (1 - MIN_PATIENCE_FACTOR) * patienceRatio;
@@ -1236,6 +1338,11 @@ export class GameModel {
         this.progress.currentLevelId = level.id;
         this.progress.targetDeliveries = level.winCondition.value;
         this.progress.unlockedFloors = level.floors.length;
+        this.elevators.forEach((elevator, index) => {
+            const range = level.elevatorServiceRanges?.[index];
+            elevator.serviceMinFloor = range?.min;
+            elevator.serviceMaxFloor = range?.max;
+        });
         this.rushEvents.length = 0;
         level.rushEvents.forEach((event) => this.rushEvents.push({ ...event, triggered: false }));
     }
@@ -1260,6 +1367,9 @@ export class GameModel {
             }
             // A strict FIFO queue cannot skip a passenger whose direction is incompatible.
             if (!predicate(passenger)) {
+                break;
+            }
+            if (!this.canElevatorServeFloor(elevator, passenger.destinationFloor)) {
                 break;
             }
             boarding.push(passenger);

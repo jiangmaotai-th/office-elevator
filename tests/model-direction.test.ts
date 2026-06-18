@@ -697,6 +697,54 @@ function testAmbientAndSmallQueueUseRealTimeAndAnyFloor(): void {
     }
 }
 
+function testTransferLevelUsesSkyLobbyLegsAndServiceRanges(): void {
+    const model = createRunningModel('4-1');
+    const passenger = model.createPassenger(0, 18);
+
+    assert(model.activeElevatorCount === 2, 'transfer level should enable two elevators');
+    assert(passenger.destinationFloor === 10, 'high-floor passengers should first travel to the sky lobby');
+    assert(passenger.finalDestinationFloor === 18, 'passenger should retain the final destination');
+    assert(passenger.transferFloor === 10, 'the sky lobby should be remembered as the transfer floor');
+    assert(!model.queueFloorForElevator(18, 0), 'low-zone elevator must reject high floors');
+    assert(!model.queueFloorForElevator(0, 1), 'high-zone elevator must reject low floors below the sky lobby');
+
+    assert(model.boardAtElevator(0) === 1, 'S1 should board the passenger for the low-zone leg');
+    model.update(0.25);
+    assert(model.queueFloorForElevator(10, 0), 'S1 should accept the sky lobby stop');
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (passenger.state === PassengerState.Waiting && passenger.originFloor === 10) {
+            break;
+        }
+    }
+
+    assert(model.economy.delivered === 0, 'reaching the sky lobby should not count as final delivery');
+    assert(passenger.state === PassengerState.Waiting, 'passenger should wait again after the transfer leg');
+    assert(passenger.originFloor === 10, 'passenger should wait at the sky lobby after transfer');
+    assert(passenger.destinationFloor === 18, 'passenger should now target the final high floor');
+    assert(passenger.transferFloor === undefined, 'transfer marker should clear after the first leg');
+
+    assert(model.queueFloorForElevator(10, 1), 'S2 should move to the sky lobby');
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (model.elevators[1].currentFloor === 10 && model.elevators[1].targetFloor === null) {
+            break;
+        }
+    }
+    assert(model.boardAtElevator(1) === 1, 'S2 should board the transferred passenger');
+    model.update(0.25);
+    assert(model.queueFloorForElevator(18, 1), 'S2 should accept the final high-floor stop');
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (passenger.state === PassengerState.Delivered) {
+            break;
+        }
+    }
+
+    assert(passenger.state === PassengerState.Delivered, 'passenger should finish after the high-zone leg');
+    assert(model.economy.delivered === 1, 'final high-floor arrival should count as one delivery');
+}
+
 testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
 testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
@@ -730,4 +778,5 @@ testFloorTypesAndRushWarnings();
 testRushEventGeneratesTypedPassengerRequests();
 testDifficultyScalesTrafficByLevelAndFloorCount();
 testAmbientAndSmallQueueUseRealTimeAndAnyFloor();
+testTransferLevelUsesSkyLobbyLegsAndServiceRanges();
 console.log('MODEL_DIRECTION_RULES_OK');

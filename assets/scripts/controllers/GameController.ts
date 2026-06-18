@@ -175,7 +175,7 @@ export class GameController {
         }
         if (this.manager.model.progress.completed) {
             if (this.view.isRestartButton(position)) {
-                const levels = this.manager.model.levelConfigs.slice(0, 3);
+                const levels = this.manager.model.levelConfigs;
                 const currentLevelId = this.manager.model.currentLevelConfig.id;
                 const currentIndex = levels.findIndex((level) => level.id === currentLevelId);
                 const nextLevel = currentIndex >= 0 ? levels[currentIndex + 1] : null;

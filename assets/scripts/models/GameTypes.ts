@@ -17,6 +17,8 @@ export interface PassengerModel {
     id: number;
     originFloor: number;
     destinationFloor: number;
+    finalDestinationFloor: number;
+    transferFloor?: number;
     destinationColorIndex: number;
     boardFloor?: number;
     boardGameTime?: number;
@@ -60,6 +62,8 @@ export interface ElevatorModel {
     passengers: number[];
     queue: number[];
     doorOpen: boolean;
+    serviceMinFloor?: number;
+    serviceMaxFloor?: number;
 }
 
 export interface EconomyModel {
@@ -135,6 +139,8 @@ export interface LevelConfig {
     description: string;
     floors: number[];
     elevators: number;
+    elevatorServiceRanges?: Array<{ min: number; max: number }>;
+    transferFloor?: number;
     floorTypes: Partial<Record<number, FloorType>>;
     passengerSpawnRules: PassengerSpawnRules;
     rushEvents: RushEventModel[];
