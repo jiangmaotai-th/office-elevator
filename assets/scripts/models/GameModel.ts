@@ -842,6 +842,7 @@ export class GameModel {
         this.progress.currentLevelId = level.id;
         this.progress.level = LEVEL_CONFIGS.findIndex((config) => config.id === level.id) + 1;
         this.passengers.length = 0;
+        this.applyLevelConfig(level);
         this.resetElevatorAndQueues();
         this.nextPassengerId = 1;
         this.economy.score = 0;
@@ -852,7 +853,6 @@ export class GameModel {
         this.progress.started = false;
         this.progress.completed = false;
         this.progress.failed = false;
-        this.applyLevelConfig(level);
         this.resetTraffic();
         this.applyUpgradeEffects();
         return true;
@@ -876,7 +876,6 @@ export class GameModel {
 
     startNewGame(): void {
         this.passengers.length = 0;
-        this.resetElevatorAndQueues();
         this.nextPassengerId = 1;
         this.economy.coins = 20;
         this.economy.stars = 0;
@@ -888,6 +887,7 @@ export class GameModel {
         this.progress.level = 1;
         this.progress.currentLevelId = '1-1';
         this.applyLevelConfig(this.currentLevelConfig);
+        this.resetElevatorAndQueues();
         this.progress.targetDeliveries = this.currentLevelConfig.winCondition.value;
         this.progress.elapsedSeconds = 0;
         this.progress.gameTime = START_TIME;
@@ -1452,9 +1452,10 @@ export class GameModel {
 
     private resetElevatorAndQueues(): void {
         this.elevators.forEach((elevator) => {
-            elevator.currentFloor = 0;
+            const startFloor = elevator.serviceMinFloor ?? 0;
+            elevator.currentFloor = startFloor;
             elevator.targetFloor = null;
-            elevator.position = 0;
+            elevator.position = startFloor;
             elevator.direction = ElevatorDirection.Idle;
             elevator.passengers = [];
             elevator.queue = [];

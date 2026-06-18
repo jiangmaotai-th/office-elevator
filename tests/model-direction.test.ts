@@ -706,6 +706,8 @@ function testTransferLevelUsesSkyLobbyLegsAndServiceRanges(): void {
     assert(passenger.destinationFloor === 3, 'high-floor passengers should first travel to the sky lobby');
     assert(passenger.finalDestinationFloor === 5, 'passenger should retain the final destination');
     assert(passenger.transferFloor === 3, 'the third floor should be remembered as the transfer floor');
+    assert(model.elevators[1].currentFloor === 3, 'S2 should start at its lowest service floor');
+    assert(model.elevators[1].position === 3, 'S2 should be visually parked on the third floor');
     assert(!model.queueFloorForElevator(5, 0), 'low-zone elevator must reject high floors');
     assert(!model.queueFloorForElevator(0, 1), 'high-zone elevator must reject low floors below the sky lobby');
 
@@ -725,13 +727,7 @@ function testTransferLevelUsesSkyLobbyLegsAndServiceRanges(): void {
     assert(passenger.destinationFloor === 5, 'passenger should now target the final high floor');
     assert(passenger.transferFloor === undefined, 'transfer marker should clear after the first leg');
 
-    assert(model.queueFloorForElevator(3, 1), 'S2 should move to the sky lobby');
-    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
-        model.update(0.05);
-        if (model.elevators[1].currentFloor === 3 && model.elevators[1].targetFloor === null) {
-            break;
-        }
-    }
+    assert(model.elevators[1].currentFloor === 3, 'S2 should already wait at the sky lobby');
     assert(model.boardAtElevator(1) === 1, 'S2 should board the transferred passenger');
     model.update(0.25);
     assert(model.queueFloorForElevator(5, 1), 'S2 should accept the final high-floor stop');

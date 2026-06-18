@@ -441,6 +441,8 @@ export class GameView implements GameHitAreas {
                 const elevator = model.elevators[slot.index];
                 if (slot.index < model.activeElevatorCount && this.elevatorServesFloor(elevator, floor)) {
                     this.drawEmptyShaft(slot.x, y, floorGap, slot.name);
+                } else if (slot.index < model.activeElevatorCount && this.isBelowElevatorService(elevator, floor)) {
+                    this.drawFoundation(slot.x, y, floorGap);
                 }
             });
         }
@@ -579,6 +581,13 @@ export class GameView implements GameHitAreas {
         return floor >= elevator.serviceMinFloor && floor <= elevator.serviceMaxFloor;
     }
 
+    private isBelowElevatorService(elevator: ElevatorModel | undefined, floor: number): boolean {
+        if (!elevator || elevator.serviceMinFloor === undefined) {
+            return false;
+        }
+        return floor < elevator.serviceMinFloor;
+    }
+
     private drawEmptyShaft(x: number, y: number, floorGap: number, name: string): void {
         const height = Math.min(112, floorGap * 0.72);
         this.graphics.fillColor = new Color(25, 27, 30, 255);
@@ -589,6 +598,22 @@ export class GameView implements GameHitAreas {
         this.graphics.roundRect(x + 17, y + height * 0.5 - 2, 66, 24, 3);
         this.graphics.fill();
         this.drawText(`shaft-${name}-${Math.round(y)}`, name, x + 37, y + height * 0.5 + 10, 14, PAPER, 40);
+    }
+
+    private drawFoundation(x: number, y: number, floorGap: number): void {
+        const height = Math.min(112, floorGap * 0.72);
+        this.graphics.fillColor = new Color(31, 32, 34, 255);
+        this.graphics.roundRect(x, y - height * 0.5, 100, height, 4);
+        this.graphics.fill();
+        this.strokeRect(x, y - height * 0.5, 100, height, new Color(72, 74, 78, 255), 2);
+        this.graphics.fillColor = new Color(88, 90, 94, 125);
+        for (let stripe = -36; stripe <= 58; stripe += 18) {
+            this.line(x + stripe, y - height * 0.5 + 6, x + stripe + 42, y + height * 0.5 - 6, new Color(92, 94, 99, 165), 3);
+        }
+        this.graphics.fillColor = new Color(16, 17, 19, 170);
+        this.graphics.roundRect(x + 12, y - 18, 76, 36, 4);
+        this.graphics.fill();
+        this.drawText(`foundation-${Math.round(x)}-${Math.round(y)}`, '地基', x + 35, y, 14, MUTED, 42);
     }
 
     private drawPassengers(model: GameModel, floor: number, y: number): void {
