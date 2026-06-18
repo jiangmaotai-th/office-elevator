@@ -66,9 +66,23 @@ const TOWER_TOP = 430;
 const FLOOR_GAP = 138;
 const FLOOR_BASE_Y = -350;
 const MIN_VISIBLE_FLOORS = 6;
+const ELEVATOR_SHAFT_WIDTH = 100;
+const S2_SHAFT_LEFT = 105;
+const S1_SHAFT_LEFT = 220;
+const ELEVATOR_SHAFTS = [
+    { index: 1, name: 'S2', x: S2_SHAFT_LEFT },
+    { index: 0, name: 'S1', x: S1_SHAFT_LEFT },
+];
+const ELEVATOR_XS = [S1_SHAFT_LEFT, S2_SHAFT_LEFT];
+
+export interface ElevatorShaftFloorHit {
+    floor: number;
+    elevatorIndex: number;
+}
 
 export interface GameHitAreas {
     floorAt(position: Vec3): number | null;
+    shaftFloorAt(position: Vec3, model: GameModel): ElevatorShaftFloorHit | null;
     isCabin(position: Vec3): boolean;
     isBuildButton(position: Vec3): boolean;
     isStartButton(position: Vec3): boolean;
@@ -176,6 +190,24 @@ export class GameView implements GameHitAreas {
         if (!this.isTowerViewport(position)) {
             return null;
         }
+        return this.floorAtY(position);
+    }
+
+    shaftFloorAt(position: Vec3, model: GameModel): ElevatorShaftFloorHit | null {
+        if (!this.isTowerViewport(position)) {
+            return null;
+        }
+        const shaft = ELEVATOR_SHAFTS.find((slot) => {
+            return position.x > slot.x && position.x < slot.x + ELEVATOR_SHAFT_WIDTH;
+        });
+        if (!shaft || shaft.index >= model.activeElevatorCount) {
+            return null;
+        }
+        const floor = this.floorAtY(position);
+        return floor === null ? null : { floor, elevatorIndex: shaft.index };
+    }
+
+    private floorAtY(position: Vec3): number | null {
         for (const floor of this.clickableFloorValues) {
             const floorY = this.floorYs.get(floor);
             if (floorY === undefined) {
@@ -183,8 +215,6 @@ export class GameView implements GameHitAreas {
             }
             if (
                 Math.abs(position.y - floorY) <= this.floorHitHalfHeight
-                && position.x > -340
-                && position.x < 340
             ) {
                 return floor;
             }
@@ -421,13 +451,6 @@ export class GameView implements GameHitAreas {
         const bottomY = FLOOR_BASE_Y + this.towerScrollOffset;
         const towerLeft = -340;
         const towerRight = 340;
-        const s2Left = 105;
-        const s1Left = 220;
-        const shaftWidth = 100;
-        const elevatorSlots = [
-            { index: 1, name: 'S2', x: s2Left },
-            { index: 0, name: 'S1', x: s1Left },
-        ];
         this.clickableFloors = model.progress.unlockedFloors;
         this.floorYs.clear();
         this.clickableFloorValues.length = 0;
@@ -460,7 +483,7 @@ export class GameView implements GameHitAreas {
             if (unlocked) {
                 this.drawPassengers(model, floor, y);
             }
-            elevatorSlots.forEach((slot) => {
+            ELEVATOR_SHAFTS.forEach((slot) => {
                 const elevator = model.elevators[slot.index];
                 if (slot.index < model.activeElevatorCount && this.elevatorServesFloor(elevator, floor)) {
                     this.drawEmptyShaft(slot.x, y, floorGap, slot.name);
@@ -470,11 +493,10 @@ export class GameView implements GameHitAreas {
             });
         }
 
-        const elevatorXs = [s1Left, s2Left];
         model.elevators.slice(0, model.activeElevatorCount).forEach((elevator, index) => {
             const elevatorY = bottomY + (elevator.position - model.minFloor) * floorGap;
             if (elevatorY > TOWER_BOTTOM - 70 && elevatorY < TOWER_TOP + 70) {
-                this.drawCabin(model, elevator, index, elevatorXs[index], elevatorY, shaftWidth);
+                this.drawCabin(model, elevator, index, ELEVATOR_XS[index], elevatorY, ELEVATOR_SHAFT_WIDTH);
             }
         });
     }

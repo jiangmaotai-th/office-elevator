@@ -238,6 +238,7 @@ export class GameController {
         const model = this.manager.model;
         const cabinIndex = this.view.cabinAt(position);
         const floor = this.view.floorAt(position);
+        const shaftHit = this.view.shaftFloorAt(position, model);
         const cabinElevator = cabinIndex === null ? null : model.elevators[cabinIndex];
         const isExplicitCabinTap = cabinIndex !== null
             && cabinElevator !== undefined
@@ -267,31 +268,44 @@ export class GameController {
             this.view.setInteractionMessage('当前是关卡制，楼层由关卡配置控制');
             return;
         }
-        if (floor !== null) {
-            const elevatorIndex = this.activeElevatorIndex >= model.activeElevatorCount ? 0 : this.activeElevatorIndex;
+        const commandFloor = shaftHit?.floor ?? floor;
+        if (commandFloor !== null) {
+            const elevatorIndex = shaftHit?.elevatorIndex
+                ?? (this.activeElevatorIndex >= model.activeElevatorCount ? 0 : this.activeElevatorIndex);
             if (elevatorIndex !== this.activeElevatorIndex) {
                 this.activeElevatorIndex = elevatorIndex;
                 this.view.setActiveElevator(elevatorIndex);
             }
             const elevator = model.elevators[elevatorIndex];
-            const queued = model.queueFloorForElevator(floor, elevatorIndex);
-            if (!queued && elevator.targetFloor === null && floor === elevator.currentFloor) {
-                this.view.setInteractionMessage(`${elevator.id} 已在 ${floor} 层`);
+            const queued = model.queueFloorForElevator(commandFloor, elevatorIndex);
+            if (!queued && elevator.targetFloor === null && commandFloor === elevator.currentFloor) {
+                this.view.setInteractionMessage(`${elevator.id} 已在 ${commandFloor} 层，点击轿厢让乘客上车`);
+            } else if (!queued && !this.canElevatorServeFloor(elevator, commandFloor)) {
+                this.view.setInteractionMessage(`${elevator.id} 无法前往 ${commandFloor} 层`);
             } else if (!queued) {
-                this.view.setInteractionMessage(`无法加入 ${floor} 层指令`);
+                this.view.setInteractionMessage(`无法加入 ${commandFloor} 层指令`);
             } else if (model.isBoarding) {
-                this.view.setInteractionMessage(`${elevator.id} 已加入 ${floor} 层，等待乘客依次上车后出发`);
+                this.view.setInteractionMessage(`${elevator.id} 已加入 ${commandFloor} 层，等待乘客依次上车后出发`);
             } else {
                 const pending = elevator.queue.length;
                 this.view.setInteractionMessage(
                     pending > 0
-                        ? `${elevator.id} 已追加 ${floor} 层，前方还有 ${pending} 个停站指令`
-                        : `${elevator.id} 正在前往 ${floor} 层`,
+                        ? `${elevator.id} 已追加 ${commandFloor} 层，前方还有 ${pending} 个停站指令`
+                        : `${elevator.id} 正在前往 ${commandFloor} 层`,
                 );
             }
             return;
         }
         this.view.setInteractionMessage('请点击楼层区域或电梯轿厢');
+    }
+
+    private canElevatorServeFloor(
+        elevator: { serviceMinFloor?: number; serviceMaxFloor?: number },
+        floor: number,
+    ): boolean {
+        const min = elevator.serviceMinFloor ?? -Infinity;
+        const max = elevator.serviceMaxFloor ?? Infinity;
+        return floor >= min && floor <= max;
     }
 
     private enqueueTrafficSpawnRequests(): void {
