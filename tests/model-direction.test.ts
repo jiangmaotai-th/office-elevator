@@ -716,20 +716,19 @@ function testTransferLevelUsesSkyLobbyLegsAndServiceRanges(): void {
     assert(model.queueFloorForElevator(3, 0), 'S1 should accept the sky lobby stop');
     for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
         model.update(0.05);
-        if (passenger.state === PassengerState.Waiting && passenger.originFloor === 3) {
+        if (passenger.state === PassengerState.Riding && model.elevators[1].passengers.includes(passenger.id)) {
             break;
         }
     }
 
     assert(model.economy.delivered === 0, 'reaching the sky lobby should not count as final delivery');
-    assert(passenger.state === PassengerState.Waiting, 'passenger should wait again after the transfer leg');
-    assert(passenger.originFloor === 3, 'passenger should wait at the sky lobby after transfer');
+    assert(passenger.state === PassengerState.Riding, 'passenger should directly transfer into S2 when it is waiting at the sky lobby');
+    assert(model.elevators[1].passengers.includes(passenger.id), 'S2 should receive the transferred passenger without an extra tap');
+    assert(passenger.originFloor === 3, 'passenger should restart the ride from the sky lobby after direct transfer');
     assert(passenger.destinationFloor === 5, 'passenger should now target the final high floor');
     assert(passenger.transferFloor === undefined, 'transfer marker should clear after the first leg');
 
     assert(model.elevators[1].currentFloor === 3, 'S2 should already wait at the sky lobby');
-    assert(model.boardAtElevator(1) === 1, 'S2 should board the transferred passenger');
-    model.update(0.25);
     assert(model.queueFloorForElevator(5, 1), 'S2 should accept the final high-floor stop');
     for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
         model.update(0.05);
@@ -740,6 +739,30 @@ function testTransferLevelUsesSkyLobbyLegsAndServiceRanges(): void {
 
     assert(passenger.state === PassengerState.Delivered, 'passenger should finish after the high-zone leg');
     assert(model.economy.delivered === 1, 'final high-floor arrival should count as one delivery');
+}
+
+function testTransferFallsBackToWaitingWhenHighElevatorIsFull(): void {
+    const model = createRunningModel('4-1');
+    const passenger = model.createPassenger(0, 5);
+    for (let index = 0; index < model.elevators[1].capacity; index += 1) {
+        const filler = model.createPassenger(3, 5);
+        filler.state = PassengerState.Riding;
+        model.elevators[1].passengers.push(filler.id);
+    }
+
+    assert(model.boardAtElevator(0) === 1, 'S1 should board the transfer passenger');
+    model.update(0.25);
+    assert(model.queueFloorForElevator(3, 0), 'S1 should move to the sky lobby');
+    for (let elapsed = 0; elapsed < 20; elapsed += 0.05) {
+        model.update(0.05);
+        if (passenger.state === PassengerState.Waiting && passenger.originFloor === 3) {
+            break;
+        }
+    }
+
+    assert(passenger.state === PassengerState.Waiting, 'passenger should wait at the sky lobby if S2 has no room');
+    assert(passenger.destinationFloor === 5, 'fallback waiting passenger should keep the final destination');
+    assert(!model.elevators[1].passengers.includes(passenger.id), 'full S2 must not overfill during direct transfer');
 }
 
 function testLevelModeNeverExposesMoreThanSixFloors(): void {
@@ -786,5 +809,6 @@ testRushEventGeneratesTypedPassengerRequests();
 testDifficultyScalesTrafficByLevelAndFloorCount();
 testAmbientAndSmallQueueUseRealTimeAndAnyFloor();
 testTransferLevelUsesSkyLobbyLegsAndServiceRanges();
+testTransferFallsBackToWaitingWhenHighElevatorIsFull();
 testLevelModeNeverExposesMoreThanSixFloors();
 console.log('MODEL_DIRECTION_RULES_OK');

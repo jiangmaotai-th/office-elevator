@@ -696,6 +696,51 @@ export class GameModel {
         return true;
     }
 
+    private transferPassengerDirectly(
+        passenger: PassengerModel,
+        fromElevatorIndex: number,
+        currentFloor: number,
+    ): boolean {
+        if (passenger.transferFloor === undefined || currentFloor !== passenger.transferFloor) {
+            return false;
+        }
+        const targetElevatorIndex = this.elevators.findIndex((elevator, index) => {
+            return index !== fromElevatorIndex
+                && index < this.activeElevatorCount
+                && elevator.currentFloor === currentFloor
+                && Math.abs(elevator.position - currentFloor) < 0.001
+                && elevator.targetFloor === null
+                && elevator.doorOpen
+                && this.unloadingQueues[index].length === 0
+                && this.boardingQueues[index].length === 0
+                && !this.isElevatorFullAt(index)
+                && this.canElevatorServeFloor(elevator, passenger.finalDestinationFloor);
+        });
+        if (targetElevatorIndex < 0) {
+            return false;
+        }
+
+        const targetElevator = this.elevators[targetElevatorIndex];
+        passenger.originFloor = currentFloor;
+        passenger.destinationFloor = passenger.finalDestinationFloor;
+        passenger.transferFloor = undefined;
+        passenger.state = PassengerState.Riding;
+        this.resetPassengerPatience(passenger);
+        passenger.boardFloor = currentFloor;
+        passenger.boardGameTime = this.progress.gameTime;
+        passenger.actualRideDistance = 0;
+        passenger.intermediateStops = 0;
+        passenger.frustration = 0;
+        passenger.lastElevatorFloor = currentFloor;
+        targetElevator.passengers.push(passenger.id);
+        this.boardedEvents.push({
+            passengerId: passenger.id,
+            destinationFloor: passenger.destinationFloor,
+            elevatorIndex: targetElevatorIndex,
+        });
+        return true;
+    }
+
     getUpcomingRushEvents(limit = 2): RushWarningModel[] {
         if (!this.isSystemEnabled('rushWarning')) {
             return [];
@@ -1129,6 +1174,9 @@ export class GameModel {
             }
             const elevator = this.elevators[elevatorIndex];
             elevator.passengers = elevator.passengers.filter((id) => id !== passenger.id);
+            if (this.transferPassengerDirectly(passenger, elevatorIndex, elevator.currentFloor)) {
+                continue;
+            }
             if (this.continuePassengerAfterTransfer(passenger, elevator.currentFloor)) {
                 continue;
             }
