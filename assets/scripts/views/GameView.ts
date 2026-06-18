@@ -17,6 +17,7 @@ import {
     ElevatorDirection,
     ElevatorModel,
     FloorType,
+    LevelConfig,
     PassengerDeliveredEvent,
     PassengerModel,
     PassengerState,
@@ -74,6 +75,7 @@ export interface GameHitAreas {
     isMenuButton(position: Vec3): boolean;
     isRestartButton(position: Vec3): boolean;
     isNewGameButton(position: Vec3): boolean;
+    chapterAt(position: Vec3, model: GameModel): number | null;
     levelAt(position: Vec3, model: GameModel): string | null;
     upgradeAt(position: Vec3): UpgradeType | null;
 }
@@ -89,6 +91,8 @@ export class GameView implements GameHitAreas {
     private readonly cabinHitAreas: Array<{ index: number; x: number; y: number; width: number; height: number }> = [];
     private activeElevatorIndex = 0;
     private menuOpen = false;
+    private selectedChapterIndex = 0;
+    private lastSyncedLevelId = '';
     private interactionMessage = '';
     private towerScrollOffset = 0;
     private deliveryFeedback: (PassengerDeliveredEvent & { startedAt: number }) | null = null;
@@ -212,14 +216,33 @@ export class GameView implements GameHitAreas {
         if (model.progress.started || model.progress.completed || model.progress.failed) {
             return null;
         }
-        const levels = model.levelConfigs;
+        this.syncSelectedChapterToCurrentLevel(model);
+        const levels = this.levelsForSelectedChapter(model);
         for (let index = 0; index < levels.length; index += 1) {
-            const y = 262 - index * 58;
-            if (position.x > -310 && position.x < 310 && position.y > y - 24 && position.y < y + 24) {
+            const y = 245 - index * 44;
+            if (position.x > -310 && position.x < 310 && position.y > y - 19 && position.y < y + 19) {
                 return levels[index].id;
             }
         }
         return null;
+    }
+
+    chapterAt(position: Vec3, model: GameModel): number | null {
+        if (model.progress.started || model.progress.completed || model.progress.failed) {
+            return null;
+        }
+        const chapters = this.chapterTitles(model);
+        for (let index = 0; index < chapters.length; index += 1) {
+            const x = -310 + index * 126;
+            if (position.x > x && position.x < x + 116 && position.y > 284 && position.y < 318) {
+                return index;
+            }
+        }
+        return null;
+    }
+
+    selectChapter(index: number): void {
+        this.selectedChapterIndex = Math.max(0, index);
     }
 
     scrollTowerBy(deltaY: number, floorCount: number): void {
@@ -852,34 +875,78 @@ export class GameView implements GameHitAreas {
     }
 
     private drawLevelSelect(model: GameModel): void {
+        this.syncSelectedChapterToCurrentLevel(model);
         this.graphics.fillColor = new Color(24, 26, 29, 232);
         this.graphics.roundRect(-330, 45, 660, 348, 10);
         this.graphics.fill();
         this.strokeRect(-330, 45, 660, 348, new Color(247, 242, 234, 170), 2);
         this.drawText('level-select-title', '选择关卡', -300, 360, 28, PAPER, 240);
-        this.drawText('level-select-desc', '从单电梯教学到双电梯、中转层，逐步练调度分。', -300, 324, 18, new Color(225, 220, 211, 230), 600);
-        const levels = model.levelConfigs;
+        this.drawText('level-select-desc', '每章 6 关，从简单机制到小考逐步升级。', -300, 328, 18, new Color(225, 220, 211, 230), 600);
+        this.drawChapterTabs(model);
+        const levels = this.levelsForSelectedChapter(model);
         levels.forEach((level, index) => {
-            const y = 262 - index * 58;
+            const y = 245 - index * 44;
             const selected = level.id === model.currentLevelConfig.id;
             this.graphics.fillColor = selected
                 ? new Color(247, 242, 234, 238)
                 : new Color(247, 242, 234, 185);
-            this.graphics.roundRect(-310, y - 24, 620, 48, 7);
+            this.graphics.roundRect(-310, y - 19, 620, 38, 7);
             this.graphics.fill();
-            this.strokeRect(-310, y - 24, 620, 48, selected ? GOLD : new Color(110, 108, 102, 210), selected ? 3 : 2);
-            this.drawText(`level-card-id-${level.id}`, level.id, -286, y + 8, 19, selected ? INK : MUTED, 62);
-            this.drawText(`level-card-title-${level.id}`, level.title.replace(/^\d-\d\s*/, ''), -218, y + 9, 19, INK, 250);
-            this.drawText(`level-card-desc-${level.id}`, level.description, -218, y - 12, 13, MUTED, 390);
+            this.strokeRect(-310, y - 19, 620, 38, selected ? GOLD : new Color(110, 108, 102, 210), selected ? 3 : 2);
+            this.drawText(`level-card-id-${level.id}`, level.id, -286, y + 6, 17, selected ? INK : MUTED, 62);
+            this.drawText(`level-card-title-${level.id}`, level.title.replace(/^\d-\d\s*/, ''), -222, y + 6, 17, INK, 180);
+            this.drawText(`level-card-desc-${level.id}`, level.description, -42, y + 3, 12, MUTED, 245);
             const stars = model.getLevelStars(level.id);
             this.drawText(
                 `level-card-stars-${level.id}`,
                 stars > 0 ? '★'.repeat(stars) : '未通关',
                 210,
                 y,
-                17,
+                15,
                 stars > 0 ? GOLD : MUTED,
                 90,
+            );
+        });
+    }
+
+    private chapterTitles(model: GameModel): string[] {
+        return [...new Set(model.levelConfigs.map((level) => level.chapter))];
+    }
+
+    private levelsForSelectedChapter(model: GameModel): LevelConfig[] {
+        const chapters = this.chapterTitles(model);
+        const chapter = chapters[this.selectedChapterIndex] ?? chapters[0];
+        return model.levelConfigs.filter((level) => level.chapter === chapter);
+    }
+
+    private syncSelectedChapterToCurrentLevel(model: GameModel): void {
+        if (this.lastSyncedLevelId === model.currentLevelConfig.id) {
+            return;
+        }
+        const chapters = this.chapterTitles(model);
+        const currentIndex = chapters.indexOf(model.currentLevelConfig.chapter);
+        if (currentIndex >= 0) {
+            this.selectedChapterIndex = currentIndex;
+            this.lastSyncedLevelId = model.currentLevelConfig.id;
+        }
+    }
+
+    private drawChapterTabs(model: GameModel): void {
+        const chapters = this.chapterTitles(model);
+        chapters.forEach((chapter, index) => {
+            const x = -310 + index * 126;
+            const selected = index === this.selectedChapterIndex;
+            this.graphics.fillColor = selected ? GOLD : new Color(247, 242, 234, 175);
+            this.graphics.roundRect(x, 284, 116, 34, 6);
+            this.graphics.fill();
+            this.drawText(
+                `chapter-tab-${index}`,
+                chapter.replace(/^第\s*(\d)\s*章.*/, '第$1章'),
+                x + 21,
+                301,
+                15,
+                selected ? INK : MUTED,
+                78,
             );
         });
     }

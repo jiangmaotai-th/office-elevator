@@ -191,6 +191,12 @@ export class GameController {
             return;
         }
         if (!this.manager.model.progress.started) {
+            const selectedChapter = this.view.chapterAt(position, this.manager.model);
+            if (selectedChapter !== null) {
+                this.view.selectChapter(selectedChapter);
+                this.view.setInteractionMessage('已切换章节，选择关卡后点击开始运营');
+                return;
+            }
             const selectedLevel = this.view.levelAt(position, this.manager.model);
             if (selectedLevel) {
                 this.manager.model.loadLevel(selectedLevel);

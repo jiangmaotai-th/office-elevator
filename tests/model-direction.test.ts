@@ -7,7 +7,7 @@ function assert(condition: boolean, message: string): void {
     }
 }
 
-function createRunningModel(levelId = '1-2'): GameModel {
+function createRunningModel(levelId = '2-1'): GameModel {
     const model = new GameModel();
     model.loadLevel(levelId);
     model.startRun();
@@ -26,7 +26,7 @@ function runUntilIdle(model: GameModel, maxSeconds = 20): void {
 
 function testRunWaitsForExplicitStart(): void {
     const model = new GameModel();
-    model.loadLevel('1-2');
+    model.loadLevel('2-1');
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 1;
     passenger.waitElapsed = 0.99;
@@ -41,7 +41,8 @@ function testRunWaitsForExplicitStart(): void {
 
     model.startRun();
     model.update(0.02);
-    assert(model.progress.failed, 'after start, patience should resume and can fail the run');
+    assert(passenger.state === PassengerState.Lost, 'after start, patience should resume and can lose the passenger');
+    assert(model.economy.lost === 1, 'lost passengers should be counted after the run starts');
 }
 
 function testManualBoardingIgnoresDirection(): void {
@@ -111,7 +112,8 @@ function testPassengerWaitTimingMatchesFortySecondRule(): void {
     model.update(9.9);
     assert(model.warningFloors.includes(0), 'warning should start at 30 seconds');
     model.update(10);
-    assert(model.progress.failed, 'the run should fail when the passenger reaches 40 seconds');
+    assert(passenger.state === PassengerState.Lost, 'the passenger should leave when reaching 40 seconds');
+    assert(model.economy.lost === 1, 'the timed-out passenger should count as lost');
 }
 
 function testCallingPassengerFloorDoesNotAutoBoardWithoutOnwardStop(): void {
@@ -383,6 +385,7 @@ function testPassengersLeaveOneAtATimeWithSeparateEvents(): void {
 
 function testPatienceWarningAndFailureRule(): void {
     const model = createRunningModel();
+    model.currentLevelConfig.failCondition.max = 0;
     const passenger = model.createPassenger(0, 2);
     passenger.maxPatience = 40;
     passenger.waitElapsed = 29;
@@ -402,10 +405,12 @@ function testPatienceWarningAndFailureRule(): void {
     assert(passenger.state === PassengerState.Lost, 'the timed-out passenger should leave the queue');
     model.update(1);
     assert(model.elevator.position === positionBeforeFailure, 'the simulation should freeze after failure');
+    model.currentLevelConfig.failCondition.max = 3;
 }
 
 function testRestartClearsFailedRun(): void {
     const model = createRunningModel();
+    model.currentLevelConfig.failCondition.max = 0;
     const passenger = model.createPassenger(1, 2);
     passenger.waitElapsed = 0.99;
     passenger.patience = 0.01;
@@ -424,6 +429,7 @@ function testRestartClearsFailedRun(): void {
     assert(model.progress.elapsedSeconds === 0, 'restart should reset the game clock');
     assert(model.progress.unlockedFloors === 5, 'restart should preserve constructed floors');
     assert(model.economy.coins === 7, 'restart should preserve the current economy');
+    model.currentLevelConfig.failCondition.max = 3;
 }
 
 function testStartNewGameResetsProgressAndEconomy(): void {
@@ -442,7 +448,7 @@ function testStartNewGameResetsProgressAndEconomy(): void {
     assert(model.progress.day === 1, 'new game should reset the day');
     assert(model.progress.level === 1, 'new game should reset the level');
     assert(model.progress.gameTime === START_TIME, 'new game should return to the morning start time');
-    assert(model.progress.unlockedFloors === 5, 'new game should reset to the first level floor set');
+    assert(model.progress.unlockedFloors === 4, 'new game should reset to the first level floor set');
     assert(model.economy.coins === 20, 'new game should reset coins');
     assert(model.economy.stars === 0, 'new game should reset stars');
     assert(model.economy.bestScore === 0, 'new game should reset best score');
@@ -451,7 +457,7 @@ function testStartNewGameResetsProgressAndEconomy(): void {
 }
 
 function testRestoreReturnsToCleanLevelStart(): void {
-    const model = createRunningModel('1-2');
+    const model = createRunningModel('2-1');
     model.createPassenger(0, 2);
     model.update(5);
     const snapshot = model.snapshot();
@@ -475,7 +481,7 @@ function testFloorExtensionHasNoArtificialSixFloorCap(): void {
 }
 
 function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
-    const model = createRunningModel('2-1');
+    const model = createRunningModel('3-1');
     model.elevators[0].capacity = 5;
     model.elevators[1].capacity = 5;
     for (let i = 0; i < 10; i += 1) {
@@ -492,7 +498,7 @@ function testSecondElevatorTakesOverflowWhenBothCabinsShareFloor(): void {
 }
 
 function testFloorCommandsStayOnExplicitElevator(): void {
-    const model = createRunningModel('2-1');
+    const model = createRunningModel('3-1');
     model.progress.unlockedFloors = 5;
 
     assert(model.queueFloorForElevator(4, 1), 'S2 should accept an explicit floor command');
@@ -501,7 +507,7 @@ function testFloorCommandsStayOnExplicitElevator(): void {
 }
 
 function testExplicitElevatorQueueSurvivesControlSwitch(): void {
-    const model = createRunningModel('2-1');
+    const model = createRunningModel('3-1');
     model.progress.unlockedFloors = 6;
 
     assert(model.queueFloorForElevator(2, 0), 'S1 should start toward floor 2');
@@ -531,7 +537,7 @@ function testExplicitElevatorQueueSurvivesControlSwitch(): void {
 }
 
 function testDeliveryAddsQualityScore(): void {
-    const model = createRunningModel('1-3');
+    const model = createRunningModel('2-3');
     const passenger = model.createPassenger(0, 1);
     passenger.patience = passenger.maxPatience;
     passenger.state = PassengerState.Riding;
@@ -555,7 +561,7 @@ function testDeliveryAddsQualityScore(): void {
 }
 
 function testIntermediateStopLowersQualityScore(): void {
-    const model = createRunningModel('1-3');
+    const model = createRunningModel('2-3');
     const passenger = model.createPassenger(0, 2);
     passenger.patience = passenger.maxPatience;
     passenger.state = PassengerState.Riding;
@@ -583,7 +589,7 @@ function testIntermediateStopLowersQualityScore(): void {
 }
 
 function testRidePatienceDecaysSlowerInsideElevator(): void {
-    const model = createRunningModel('1-3');
+    const model = createRunningModel('2-3');
     const passenger = model.createPassenger(0, 2);
     passenger.state = PassengerState.Riding;
     passenger.boardFloor = 0;
@@ -598,7 +604,7 @@ function testRidePatienceDecaysSlowerInsideElevator(): void {
 }
 
 function testStopsAndDetoursIncreaseRidePatienceDecay(): void {
-    const model = createRunningModel('1-3');
+    const model = createRunningModel('2-3');
     const passenger = model.createPassenger(0, 2);
     passenger.state = PassengerState.Riding;
     passenger.boardFloor = 0;
@@ -619,7 +625,7 @@ function testStopsAndDetoursIncreaseRidePatienceDecay(): void {
 }
 
 function testPassengerDestinationColorStaysStableWhileBoarding(): void {
-    const model = createRunningModel('1-3');
+    const model = createRunningModel('2-3');
     const passenger = model.createPassenger(0, 4);
     const colorIndex = passenger.destinationColorIndex;
 
@@ -645,8 +651,8 @@ function testFloorTypesAndRushWarnings(): void {
     const warnings = model.getUpcomingRushEvents(2);
     assert(warnings.length === 0, 'chapter one should not show rush warnings yet');
 
-    model.loadLevel('2-1');
-    assert(model.activeElevatorCount === 2, 'level 2-1 should enable the second elevator');
+    model.loadLevel('3-1');
+    assert(model.activeElevatorCount === 2, 'level 3-1 should enable the second elevator');
 }
 
 function testRushEventGeneratesTypedPassengerRequests(): void {
@@ -663,14 +669,14 @@ function testRushEventGeneratesTypedPassengerRequests(): void {
 
 function testDifficultyScalesTrafficByLevelAndFloorCount(): void {
     const early = createRunningModel();
-    assert(early.currentTimeScale === 1.5, 'level 1-2 should use the second beginner time scale');
-    assert(early.currentWaitingPassengerLimit === 14, 'level 1-2 should use its own queue cap');
+    assert(early.currentTimeScale === 1.5, 'level 2-1 should use the second chapter time scale');
+    assert(early.currentWaitingPassengerLimit === 14, 'level 2-1 should use its own queue cap');
 
-    const later = createRunningModel('2-1');
-    assert(later.currentTimeScale === 2.5, 'the hidden 2-1 config should use the next difficulty band');
-    assert(later.currentWaitingPassengerLimit === 20, 'level 2-1 should raise the queue cap');
+    const later = createRunningModel('3-1');
+    assert(later.currentTimeScale === 2, 'level 3-1 should use the dual-elevator difficulty band');
+    assert(later.currentWaitingPassengerLimit === 18, 'level 3-1 should raise the queue cap');
 
-    assert(later.activeElevatorCount === 2, 'level 2-1 should be ready for dual-elevator tuning');
+    assert(later.activeElevatorCount === 2, 'level 3-1 should be ready for dual-elevator tuning');
 }
 
 function testAmbientAndSmallQueueUseRealTimeAndAnyFloor(): void {
@@ -684,12 +690,12 @@ function testAmbientAndSmallQueueUseRealTimeAndAnyFloor(): void {
         model.update(0.2);
         const ambientRequests = model.drainTrafficSpawnRequests();
 
-        assert(model.currentWaitingPassengerLimit === 14, 'level 1-2 waiting queue should use its configured cap');
+        assert(model.currentWaitingPassengerLimit === 14, 'level 2-1 waiting queue should use its configured cap');
         assert(ambientRequests.length === 1, 'ambient traffic should spawn one passenger early');
         assert(ambientRequests[0].originFloor === 0, 'ambient traffic can start from any unlocked floor');
         assert(ambientRequests[0].destinationFloor === 1, 'ambient traffic can target any different unlocked floor');
 
-        model.update(40);
+        model.update(46);
         const smallQueueRequests = model.drainTrafficSpawnRequests();
         assert(smallQueueRequests.length >= 2, 'small queues should appear on the opening rhythm');
     } finally {
@@ -775,6 +781,17 @@ function testLevelModeNeverExposesMoreThanSixFloors(): void {
     });
 }
 
+function testCampaignHasFiveChaptersWithSixLevelsEach(): void {
+    const model = new GameModel();
+    const chapters = [...new Set(model.levelConfigs.map((level) => level.chapter))];
+    assert(chapters.length === 5, 'campaign should have five chapters');
+    assert(model.levelConfigs.length === 30, 'campaign should have thirty levels');
+    chapters.forEach((chapter) => {
+        const levels = model.levelConfigs.filter((level) => level.chapter === chapter);
+        assert(levels.length === 6, `${chapter} should contain six levels`);
+    });
+}
+
 testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
 testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
@@ -811,4 +828,5 @@ testAmbientAndSmallQueueUseRealTimeAndAnyFloor();
 testTransferLevelUsesSkyLobbyLegsAndServiceRanges();
 testTransferFallsBackToWaitingWhenHighElevatorIsFull();
 testLevelModeNeverExposesMoreThanSixFloors();
+testCampaignHasFiveChaptersWithSixLevelsEach();
 console.log('MODEL_DIRECTION_RULES_OK');
