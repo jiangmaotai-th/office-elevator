@@ -657,6 +657,7 @@ function testFloorTypesAndRushWarnings(): void {
 
 function testRushEventGeneratesTypedPassengerRequests(): void {
     const model = createRunningModel();
+    model.drainTrafficSpawnRequests();
 
     model.update(1.9);
     assert(model.drainTrafficSpawnRequests().length === 0, 'ambient traffic should wait for the configured first delay');
@@ -684,6 +685,7 @@ function testAmbientAndSmallQueueUseRealTimeAndAnyFloor(): void {
     Math.random = () => 0;
     try {
         const model = createRunningModel();
+        model.drainTrafficSpawnRequests();
         model.update(1.9);
         assert(model.drainTrafficSpawnRequests().length === 0, 'ambient traffic should wait for its first short delay');
 
@@ -792,6 +794,28 @@ function testCampaignHasFiveChaptersWithSixLevelsEach(): void {
     });
 }
 
+function testTeachingLevelsSpawnThemePassengersOnStart(): void {
+    const model = new GameModel();
+    model.loadLevel('1-4');
+    model.startRun();
+    const capacityRequests = model.drainTrafficSpawnRequests();
+
+    assert(capacityRequests.length === 7, 'capacity lesson should start with more passengers than one cabin can hold');
+    assert(
+        capacityRequests.every((request) => request.originFloor === 0 && request.destinationFloor === 5),
+        'capacity lesson should show one floor queue overflowing a five-person cabin',
+    );
+
+    model.loadLevel('4-3');
+    model.startRun();
+    const transferCapacityRequests = model.drainTrafficSpawnRequests();
+    assert(transferCapacityRequests.length === 9, 'transfer capacity lesson should start with a crowded transfer route');
+    assert(
+        transferCapacityRequests.every((request) => request.originFloor === 0 && request.destinationFloor === 5),
+        'transfer capacity lesson should force low-to-high transfer pressure',
+    );
+}
+
 testRunWaitsForExplicitStart();
 testManualBoardingIgnoresDirection();
 testBoardingPassengersRemainInVisibleLineUntilTheyEnter();
@@ -829,4 +853,5 @@ testTransferLevelUsesSkyLobbyLegsAndServiceRanges();
 testTransferFallsBackToWaitingWhenHighElevatorIsFull();
 testLevelModeNeverExposesMoreThanSixFloors();
 testCampaignHasFiveChaptersWithSixLevelsEach();
+testTeachingLevelsSpawnThemePassengersOnStart();
 console.log('MODEL_DIRECTION_RULES_OK');

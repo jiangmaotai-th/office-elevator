@@ -377,7 +377,7 @@ export class GameView implements GameHitAreas {
         this.labels.stats.string = `${model.economy.delivered}  已送达    ${model.waitingPassengers.length}  等待中`;
         this.labels.menu.string = '菜单';
         this.labels.notice.string = this.interactionMessage || (!model.progress.started
-            ? '点击开始运营后，乘客才会出现和倒计时'
+            ? '阅读教学说明，点确定开始后乘客才会出现'
             : '少绕路、少中停、高耐心送达，单个乘客评分会更高');
         this.drawRushWarnings(model);
 
@@ -820,6 +820,12 @@ export class GameView implements GameHitAreas {
             PAPER,
             68,
         );
+        if (!model.isSystemEnabled('qualityScore')) {
+            if (this.labels.deliveryMultiplier) {
+                this.labels.deliveryMultiplier.node.active = false;
+            }
+            return;
+        }
         const elevatorIndex = feedback.elevatorIndex ?? 0;
         const badgeX = elevatorIndex === 0 ? 225 : 110;
         this.graphics.fillColor = new Color(22, 23, 25, 230);
@@ -836,7 +842,7 @@ export class GameView implements GameHitAreas {
         );
     }
 
-    private drawScoreBonusFeedback(): void {
+    private drawScoreBonusFeedback(model: GameModel): void {
         const label = this.labels.scoreBonus;
         const feedback = this.deliveryFeedback;
         if (!label || !feedback) {
@@ -854,7 +860,9 @@ export class GameView implements GameHitAreas {
         label.node.active = true;
         label.color = this.qualityColor(feedback.scoreGain);
         label.node.setPosition(new Vec3(-30, -503 + progress * 22));
-        label.string = `+${feedback.scoreGain} ${feedback.qualityLabel}`;
+        label.string = model.isSystemEnabled('qualityScore')
+            ? `+${feedback.scoreGain} ${feedback.qualityLabel}`
+            : `+${feedback.scoreGain}`;
     }
 
     private drawBuildButton(model: GameModel): void {
@@ -870,7 +878,7 @@ export class GameView implements GameHitAreas {
         const capacity = activeElevators.reduce((sum, elevator) => sum + elevator.capacity, 0);
         this.labels.scoreHud.color = PAPER;
         this.labels.scoreHud.string = `分数 ${model.economy.score}`;
-        this.drawScoreBonusFeedback();
+        this.drawScoreBonusFeedback(model);
         this.labels.floorHint.string = `金币 ${model.economy.coins}    载客 ${occupancy}/${capacity}`;
     }
 
@@ -953,25 +961,25 @@ export class GameView implements GameHitAreas {
 
     private drawStartPrompt(model: GameModel): void {
         this.graphics.fillColor = new Color(247, 242, 234, 218);
-        this.graphics.roundRect(-300, -335, 600, 135, 8);
+        this.graphics.roundRect(-310, -360, 620, 170, 8);
         this.graphics.fill();
-        this.strokeRect(-300, -335, 600, 135, INK, 2);
-        this.drawText('start-title', model.currentLevelConfig.title, -245, -230, 28, INK, 490);
+        this.strokeRect(-310, -360, 620, 170, INK, 2);
+        this.drawText('start-title', `教学说明：${model.currentLevelConfig.title}`, -285, -220, 25, INK, 560);
         this.drawText(
             'start-desc',
-            `目标：达到 ${model.progress.targetDeliveries} 分 · 电梯 ${model.activeElevatorCount} 台 · 最高分 ${model.economy.bestScore}`,
-            -245,
+            `${model.currentLevelConfig.tutorialText ?? model.currentLevelConfig.description}\n目标：达到 ${model.progress.targetDeliveries} 分 · 电梯 ${model.activeElevatorCount} 台`,
             -285,
-            20,
+            -292,
+            18,
             MUTED,
-            480,
+            560,
         );
         this.graphics.fillColor = INK;
         this.graphics.roundRect(-105, -560, 240, 80, 5);
         this.graphics.fill();
         this.labels.start.node.active = true;
         this.labels.start.color = PAPER;
-        this.labels.start.string = '开始运营';
+        this.labels.start.string = '确定开始';
     }
 
     private drawQueueIncreaseFeedbacks(): void {

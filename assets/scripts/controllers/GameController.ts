@@ -186,7 +186,7 @@ export class GameController {
                 this.passengerAppearTimer = 0;
                 this.pendingPassengerSpawns.length = 0;
                 this.manager.saveNow();
-                this.view.setInteractionMessage(nextLevel ? '已进入下一关，点击开始运营' : '已返回选关，点击关卡或开始运营');
+                this.view.setInteractionMessage(nextLevel ? '已进入下一关，阅读教学后点确定开始' : '已返回选关，点击关卡查看教学');
             }
             return;
         }
@@ -205,7 +205,7 @@ export class GameController {
                 this.view.resetTowerScroll();
                 this.pendingPassengerSpawns.length = 0;
                 this.passengerAppearTimer = 0;
-                this.view.setInteractionMessage('关卡已切换，点击开始运营');
+                this.view.setInteractionMessage('关卡已切换，阅读教学后点确定开始');
                 this.manager.saveNow();
                 return;
             }
@@ -218,7 +218,7 @@ export class GameController {
             } else if (this.view.isBuildButton(position)) {
                 this.view.setInteractionMessage('当前是关卡制，楼层由关卡配置控制');
             } else {
-                this.view.setInteractionMessage('点击开始运营后，乘客才会出现和倒计时');
+                this.view.setInteractionMessage('先阅读教学说明，点确定开始后乘客才会出现');
             }
             return;
         }
@@ -324,7 +324,7 @@ export class GameController {
         this.passengerAppearTimer = 0;
         this.pendingPassengerSpawns.length = 0;
         this.view.resetTowerScroll();
-        this.view.setInteractionMessage('已全新开始，点击开始运营');
+        this.view.setInteractionMessage('已全新开始，阅读教学后点确定开始');
     }
 
     private updatePendingPassengerSpawns(deltaTime: number): void {

@@ -137,6 +137,7 @@ export interface LevelConfig {
     chapter: string;
     title: string;
     description: string;
+    tutorialText?: string;
     floors: number[];
     elevators: number;
     elevatorServiceRanges?: Array<{ min: number; max: number }>;

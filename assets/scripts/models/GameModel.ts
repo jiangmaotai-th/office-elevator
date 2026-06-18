@@ -603,6 +603,46 @@ const LEVEL_CONFIGS: LevelConfig[] = [
     },
 ];
 
+function traffic(originFloor: number, destinationFloor: number, amount: number): TrafficSpawnRequest[] {
+    return Array.from({ length: amount }, () => ({ originFloor, destinationFloor }));
+}
+
+function initialTrafficForLevel(levelId: string): TrafficSpawnRequest[] {
+    const presets: Record<string, TrafficSpawnRequest[]> = {
+        '1-1': traffic(0, 2, 2),
+        '1-2': [...traffic(0, 3, 1), ...traffic(1, 4, 1)],
+        '1-3': [...traffic(0, 2, 2), ...traffic(0, 4, 1)],
+        '1-4': traffic(0, 5, 7),
+        '1-5': [...traffic(0, 2, 1), ...traffic(0, 4, 1), ...traffic(0, 1, 1), ...traffic(0, 5, 1)],
+        '1-6': [...traffic(0, 5, 3), ...traffic(2, 0, 2), ...traffic(4, 1, 2)],
+        '2-1': traffic(0, 4, 3),
+        '2-2': [...traffic(0, 5, 2), ...traffic(3, 0, 2), ...traffic(5, 1, 1)],
+        '2-3': [...traffic(0, 5, 2), ...traffic(2, 4, 1)],
+        '2-4': [...traffic(0, 5, 2), ...traffic(2, 5, 2), ...traffic(3, 5, 1)],
+        '2-5': [...traffic(0, 5, 3), ...traffic(5, 0, 2), ...traffic(1, 4, 2)],
+        '2-6': [...traffic(0, 5, 4), ...traffic(2, 4, 3), ...traffic(5, 1, 2)],
+        '3-1': [...traffic(0, 4, 3), ...traffic(0, 5, 3)],
+        '3-2': [...traffic(0, 2, 3), ...traffic(0, 5, 3)],
+        '3-3': traffic(0, 5, 10),
+        '3-4': [...traffic(0, 5, 3), ...traffic(2, 4, 3), ...traffic(5, 0, 3)],
+        '3-5': [...traffic(0, 5, 4), ...traffic(1, 4, 3), ...traffic(5, 2, 3)],
+        '3-6': [...traffic(0, 5, 5), ...traffic(2, 4, 4), ...traffic(5, 0, 4)],
+        '4-1': traffic(0, 5, 3),
+        '4-2': [...traffic(0, 5, 4), ...traffic(1, 4, 2)],
+        '4-3': traffic(0, 5, 9),
+        '4-4': [...traffic(0, 5, 4), ...traffic(5, 0, 4)],
+        '4-5': [...traffic(0, 5, 6), ...traffic(2, 4, 4)],
+        '4-6': [...traffic(0, 5, 6), ...traffic(5, 0, 5), ...traffic(1, 4, 4)],
+        '5-1': traffic(0, 5, 6),
+        '5-2': [...traffic(4, 1, 5), ...traffic(1, 5, 3)],
+        '5-3': traffic(-1, 4, 6),
+        '5-4': [...traffic(4, 0, 4), ...traffic(3, -1, 4)],
+        '5-5': [...traffic(0, 4, 4), ...traffic(-1, 3, 4), ...traffic(4, 1, 3)],
+        '5-6': [...traffic(0, 4, 5), ...traffic(-1, 3, 5), ...traffic(4, 1, 4), ...traffic(3, 2, 3)],
+    };
+    return presets[levelId] ?? [];
+}
+
 export class GameModel {
     readonly passengers: PassengerModel[] = [];
     readonly elevators: ElevatorModel[] = [
@@ -1150,9 +1190,10 @@ export class GameModel {
     }
 
     startRun(): void {
-        if (this.progress.completed || this.progress.failed) {
+        if (this.progress.started || this.progress.completed || this.progress.failed) {
             return;
         }
+        this.trafficSpawnRequests.push(...initialTrafficForLevel(this.currentLevelConfig.id));
         this.progress.started = true;
     }
 
